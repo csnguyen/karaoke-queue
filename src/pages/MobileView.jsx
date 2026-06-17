@@ -72,9 +72,10 @@ export default function MobileView() {
   const [roomError, setRoomError] = useState(null)
   const { current, queue, paused, addSong, addNext, removeSong, skip, reorder, togglePause } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
-  const { tvCurrent } = useRoomPoll(activeRoom)
-  // When in a room, show what TV is playing; fall back to local current otherwise
+  const { tvCurrent, tvQueue: remoteTvQueue } = useRoomPoll(activeRoom)
+  // When in a room, mirror TV's state; fall back to local state otherwise
   const nowPlaying = activeRoom ? (tvCurrent ?? null) : current
+  const displayQueue = activeRoom && remoteTvQueue !== undefined ? remoteTvQueue : queue
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -290,23 +291,35 @@ export default function MobileView() {
           </button>
         )}
 
-        {/* Queue with drag-to-reorder */}
+        {/* Queue — mirrors TV's queue when in a room */}
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-            Queue ({queue.length})
+            Queue ({displayQueue.length})
           </h2>
-          {queue.length > 1 && (
+          {!activeRoom && displayQueue.length > 1 && (
             <span className="text-xs text-gray-600">hold & drag to reorder</span>
           )}
         </div>
 
-        {queue.length === 0 ? (
+        {displayQueue.length === 0 ? (
           <p className="text-gray-600 text-sm" data-testid="queue-empty">Search for songs to add to the queue</p>
+        ) : activeRoom ? (
+          <ul className="space-y-2" data-testid="queue-list">
+            {displayQueue.map((song, i) => (
+              <li key={song.id} className="flex items-center gap-3 bg-gray-800 rounded-lg p-3">
+                <span className="text-gray-500 text-xs w-4 text-center shrink-0">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">{song.title}</p>
+                  <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={queue.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+            <SortableContext items={displayQueue.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <ul className="space-y-2" data-testid="queue-list">
-                {queue.map((song, i) => (
+                {displayQueue.map((song, i) => (
                   <SortableQueueItem
                     key={song.id}
                     song={song}
