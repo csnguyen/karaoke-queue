@@ -55,11 +55,11 @@ describe('useYouTubeSearch', () => {
     expect(r).not.toHaveProperty('_score')
   })
 
-  it('appends "karaoke" to the search query', async () => {
+  it('appends "lyrics" to the search query', async () => {
     const spy = mockBoth([])
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Bohemian Rhapsody') })
-    expect(spy.mock.calls[0][0]).toContain('Bohemian+Rhapsody+karaoke')
+    expect(spy.mock.calls[0][0]).toContain('Bohemian+Rhapsody+lyrics')
   })
 
   it('sends videoEmbeddable=true', async () => {
@@ -104,37 +104,35 @@ describe('useYouTubeSearch', () => {
     expect(result.current.results[0].videoId).toBe('high')
   })
 
-  it('karaoke and lyrics are equal — karaoke+lyrics beats either alone', async () => {
+  it('lyrics beats plain title — lyrics is the top signal', async () => {
     mockBoth(
       [
-        fakeItem('kar', 'Song Karaoke'),
+        fakeItem('plain', 'Song Karaoke'),
         fakeItem('lyr', 'Song with Lyrics'),
-        fakeItem('both', 'Song Karaoke with Lyrics'),
       ],
-      [fakeStats('kar', 0, 0), fakeStats('lyr', 0, 0), fakeStats('both', 0, 0)],
+      [fakeStats('plain', 0, 0), fakeStats('lyr', 0, 0)],
     )
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Song') })
-    // karaoke+lyrics combo wins; plain karaoke and plain lyrics tie for second
-    expect(result.current.results[0].videoId).toBe('both')
+    expect(result.current.results[0].videoId).toBe('lyr')
   })
 
-  it('ranks karaoke+lyrics+official above karaoke+lyrics without official', async () => {
+  it('lyrics+vocals beats lyrics alone', async () => {
     mockBoth(
-      [fakeItem('noo', 'Song Karaoke with Lyrics'), fakeItem('off', 'Song Official Karaoke with Lyrics')],
-      [fakeStats('noo', 0, 0), fakeStats('off', 0, 0)],
+      [fakeItem('lyr', 'Song with Lyrics'), fakeItem('lyrvoc', 'Song with Lyrics and Vocal')],
+      [fakeStats('lyr', 0, 0), fakeStats('lyrvoc', 0, 0)],
     )
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Song') })
-    expect(result.current.results[0].videoId).toBe('off')
+    expect(result.current.results[0].videoId).toBe('lyrvoc')
   })
 
-  it('ranks karaoke+lyrics+official+vocals as the top result', async () => {
+  it('ranks lyrics+vocals+official video as the top result', async () => {
     mockBoth(
       [
-        fakeItem('a', 'Song Karaoke'),
-        fakeItem('b', 'Song Karaoke with Lyrics'),
-        fakeItem('c', 'Song Official Karaoke with Lyrics Guide Vocal'),
+        fakeItem('a', 'Song with Lyrics'),
+        fakeItem('b', 'Song with Lyrics and Vocal'),
+        fakeItem('c', 'Song Official Music Video with Lyrics and Vocal'),
       ],
       [fakeStats('a', 0, 0), fakeStats('b', 0, 0), fakeStats('c', 0, 0)],
     )
@@ -146,8 +144,8 @@ describe('useYouTubeSearch', () => {
   it('penalises "no guide" and "instrumental only" titles', async () => {
     mockBoth(
       [
-        fakeItem('bad',  'Song Karaoke No Guide Melody Instrumental Only'),
-        fakeItem('good', 'Song Karaoke with Lyrics'),
+        fakeItem('bad',  'Song No Guide Melody Instrumental Only'),
+        fakeItem('good', 'Song with Lyrics'),
       ],
       [fakeStats('bad', 0, 0), fakeStats('good', 0, 0)],
     )

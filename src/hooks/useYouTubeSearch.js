@@ -1,28 +1,29 @@
 import { useState, useCallback } from 'react'
 
-// Keyword priority order: karaoke > lyrics > official > vocals
-// Goal: karaoke videos with lyrics that ideally use the official version and include vocals.
+// Keyword priority: lyrics (top) > vocals > video > official
+// "karaoke" is intentionally NOT scored — it correlates with low-quality channels.
 function scoreKaraokeResult(snippet) {
   const t = (snippet.title ?? '').toLowerCase()
   let score = 0
 
-  // 1+2. Karaoke and lyrics are equal primary signals — both worth 35 points
-  if (t.includes('karaoke')) score += 35
-  if (t.includes('with lyrics') || t.includes('w/ lyrics') || t.includes('lyric video')) score += 35
-  else if (t.includes('lyrics') || t.includes('lyric')) score += 20
+  // 1. Lyrics — primary quality signal
+  if (t.includes('with lyrics') || t.includes('w/ lyrics') || t.includes('lyric video')) score += 40
+  else if (t.includes('lyrics') || t.includes('lyric')) score += 30
 
-  // 3. Official — higher production quality
-  if (t.includes('official')) score += 15
-
-  // 4. Vocals / guide melody — someone to sing along with
-  if (t.includes('guide melody') || t.includes('guide vocal') || t.includes('with guide')) score += 10
-  if (t.includes('vocal') && !t.includes('no vocal')) score += 8
+  // 2. Vocals — someone to sing along with
+  if (t.includes('guide melody') || t.includes('guide vocal') || t.includes('with guide')) score += 20
+  else if (t.includes('vocal') && !t.includes('no vocal')) score += 15
   if (t.includes('backing vocal')) score += 5
+
+  // 3. Video — official or music video signals higher production quality
+  if (t.includes('official video') || t.includes('official music video')) score += 15
+  else if (t.includes('music video') || t.includes('official')) score += 10
+  else if (t.includes('video')) score += 5
 
   // Penalise explicitly vocal-free / instrumental-only versions
   if (t.includes('no guide') || t.includes('no vocal') || t.includes('no guide melody')) score -= 15
   if (t.includes('instrumental only') || t.includes('backing track only')) score -= 12
-  if (t.includes('instrumental') && !t.includes('karaoke') && !t.includes('lyrics')) score -= 8
+  if (t.includes('instrumental') && !t.includes('lyrics')) score -= 8
 
   return score
 }
@@ -51,7 +52,7 @@ export function useYouTubeSearch(apiKeyOverride) {
       // Step 1 — search for candidates
       const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search')
       searchUrl.searchParams.set('part', 'snippet')
-      searchUrl.searchParams.set('q', `${query} karaoke`)
+      searchUrl.searchParams.set('q', `${query} lyrics`)
       searchUrl.searchParams.set('type', 'video')
       searchUrl.searchParams.set('videoCategoryId', '10')
       searchUrl.searchParams.set('videoEmbeddable', 'true')
