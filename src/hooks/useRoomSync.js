@@ -3,31 +3,21 @@ import { useQueue } from '../context/QueueContext'
 
 export const POLL_INTERVAL_MS = 2500
 
-export function useRoomSync() {
-  const [roomCode, setRoomCode] = useState(null)
+// Polls a room code and merges incoming songs into the local queue.
+// Used by both TVView (after createRoom) and MobileView (after joining a room).
+export function useRoomPoll(roomCode) {
   const [syncError, setSyncError] = useState(null)
   const { mergeRemoteSongs } = useQueue()
   const intervalRef = useRef(null)
   const activeRef = useRef(true)
 
-  const createRoom = useCallback(async () => {
-    try {
-      const res = await fetch('/api/create-room', { method: 'POST' })
-      if (!res.ok) throw new Error(`Create room failed: ${res.status}`)
-      const { code } = await res.json()
-      setRoomCode(code)
-      setSyncError(null)
-      return code
-    } catch (err) {
-      setSyncError(err.message ?? 'Failed to create room')
-      return null
-    }
-  }, [])
+  useEffect(() => {
+    if (!roomCode) return
+    activeRef.current = true
 
-  const poll = useCallback(
-    async (code) => {
+    const poll = async () => {
       try {
-        const res = await fetch(`/api/get-room?code=${encodeURIComponent(code)}`)
+        const res = await fetch(`/api/get-room?code=${encodeURIComponent(roomCode)}`)
         if (!res.ok) throw new Error(`Sync failed: ${res.status}`)
         const { songs } = await res.json()
         if (activeRef.current) {
@@ -35,24 +25,40 @@ export function useRoomSync() {
           setSyncError(null)
         }
       } catch (err) {
-        if (activeRef.current) {
-          setSyncError(err.message ?? 'Sync error')
-        }
+        if (activeRef.current) setSyncError(err.message ?? 'Sync error')
       }
-    },
-    [mergeRemoteSongs]
-  )
+    }
 
-  useEffect(() => {
-    if (!roomCode) return
-    activeRef.current = true
-    poll(roomCode)
-    intervalRef.current = setInterval(() => poll(roomCode), POLL_INTERVAL_MS)
+    poll()
+    intervalRef.current = setInterval(poll, POLL_INTERVAL_MS)
     return () => {
       activeRef.current = false
       clearInterval(intervalRef.current)
     }
-  }, [roomCode, poll])
+  }, [roomCode, mergeRemoteSongs])
+
+  return { syncError }
+}
+
+export function useRoomSync() {
+  const [roomCode, setRoomCode] = useState(null)
+  const [createError, setCreateError] = useState(null)
+  const { syncError: pollError } = useRoomPoll(roomCode)
+  const syncError = createError ?? pollError
+
+  const createRoom = useCallback(async () => {
+    try {
+      const res = await fetch('/api/create-room', { method: 'POST' })
+      if (!res.ok) throw new Error(`Create room failed: ${res.status}`)
+      const { code } = await res.json()
+      setRoomCode(code)
+      setCreateError(null)
+      return code
+    } catch (err) {
+      setCreateError(err.message ?? 'Failed to create room')
+      return null
+    }
+  }, [])
 
   return { roomCode, syncError, createRoom }
 }

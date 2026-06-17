@@ -16,7 +16,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { useQueue } from '../context/QueueContext'
 import { useYouTubeSearch } from '../hooks/useYouTubeSearch'
-import { pushSongToRoom } from '../hooks/useRoomSync'
+import { pushSongToRoom, useRoomPoll } from '../hooks/useRoomSync'
 
 function formatCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -72,6 +72,7 @@ export default function MobileView() {
   const [roomError, setRoomError] = useState(null)
   const { current, queue, paused, addSong, addNext, removeSong, skip, reorder, togglePause } = useQueue()
   const { results, loading, error, search } = useYouTubeSearch()
+  useRoomPoll(activeRoom)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
