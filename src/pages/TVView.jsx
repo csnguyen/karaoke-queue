@@ -1,12 +1,11 @@
 import React, { useEffect } from 'react'
 import KaraokePlayer from '../components/KaraokePlayer'
 import { useQueue } from '../context/QueueContext'
+import { useMultiDeviceSync } from '../hooks/useMultiDeviceSync'
 import { useRoomSync } from '../hooks/useRoomSync'
 
 export default function TVView() {
-  // useMultiDeviceSync removed — it called restore() which overwrote current whenever
-  // mobile updated localStorage (mobile state has current:null), stopping playback.
-  // KV polling via useRoomSync handles cross-device sync without touching current.
+  useMultiDeviceSync() // safe now — uses mergeRemoteSongs, never overwrites current
   const { current, queue, skip, skipTo, paused } = useQueue()
   const { roomCode, syncError, createRoom } = useRoomSync()
 

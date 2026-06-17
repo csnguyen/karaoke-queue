@@ -1,31 +1,41 @@
 import { useState, useCallback } from 'react'
 
-// Score a search result by how well it matches an ideal karaoke video:
-// embeddable, has on-screen lyrics, and includes a guide vocal.
+// Priority tiers (highest to lowest):
+//   1. Official music/lyric video with on-screen lyrics
+//   2. Karaoke with guide vocals present
+//   3. Karaoke with on-screen lyrics (instrumental backing)
+//   4. Plain karaoke / other
+//   5. Instrumental / backing track only (no lyrics, no vocals)
 function scoreKaraokeResult(snippet) {
   const t = (snippet.title ?? '').toLowerCase()
   let score = 0
 
-  // Core karaoke signal
-  if (t.includes('karaoke')) score += 10
+  const hasLyrics = t.includes('lyrics') || t.includes('lyric video') || t.includes('with lyrics') || t.includes('w/ lyrics')
+  const hasVocals = (t.includes('vocal') && !t.includes('no vocal')) ||
+                    t.includes('guide melody') || t.includes('guide vocal') ||
+                    t.includes('with guide') || t.includes('backing vocal')
+  const isOfficial = t.includes('official')
+  const isKaraoke  = t.includes('karaoke')
 
-  // On-screen lyrics (strongly preferred)
-  if (t.includes('with lyrics') || t.includes('w/ lyrics') || t.includes('w/lyrics')) score += 8
-  if (t.includes('lyrics') && !t.includes('no lyrics')) score += 4
+  // Tier 1 — official music/lyric video with lyrics (best singalong experience)
+  if (isOfficial && hasLyrics) score += 40
+  else if (isOfficial) score += 20
 
-  // Guide vocal / backing vocal present (user wants vocals)
-  if (t.includes('guide melody') || t.includes('guide vocal') || t.includes('with guide')) score += 6
-  if (t.includes('vocal') && !t.includes('no vocal')) score += 3
-  if (t.includes('backing vocal')) score += 3
+  // Tier 2 — guide vocals present (sing along with a voice)
+  if (hasVocals) score += 30
+  if (isKaraoke && hasVocals) score += 5  // karaoke+vocals is better than video+vocals
 
-  // Official releases tend to be higher quality
-  if (t.includes('official')) score += 5
+  // Tier 3 — karaoke with on-screen lyrics
+  if (isKaraoke && hasLyrics) score += 20
+  else if (hasLyrics) score += 15
 
-  // Penalise vocal-free versions
-  if (t.includes('no guide') || t.includes('no vocal') || t.includes('no guide melody')) score -= 8
-  if (t.includes('instrumental only') || t.includes('backing track only')) score -= 6
-  // "instrumental" alone (without karaoke context) usually means no vocals
-  if (t.includes('instrumental') && !t.includes('karaoke')) score -= 4
+  // Tier 4 — plain karaoke
+  if (isKaraoke) score += 5
+
+  // Penalise no-vocal / instrumental-only results
+  if (t.includes('no guide') || t.includes('no vocal') || t.includes('no guide melody')) score -= 20
+  if (t.includes('instrumental only') || t.includes('backing track only')) score -= 15
+  if (t.includes('instrumental') && !isKaraoke && !hasLyrics) score -= 10
 
   return score
 }

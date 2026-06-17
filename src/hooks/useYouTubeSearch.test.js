@@ -65,28 +65,40 @@ describe('useYouTubeSearch', () => {
     expect(spy.mock.calls[0][0]).toContain('maxResults=20')
   })
 
-  it('sorts "karaoke with lyrics + guide vocal" above "instrumental only"', async () => {
+  it('ranks official lyric video above karaoke with guide vocal', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       mockApiResponse([
-        fakeItem('bad',  'Song Instrumental Only'),
-        fakeItem('good', 'Song Karaoke with Lyrics Guide Melody'),
+        fakeItem('kar', 'Song Karaoke with Guide Melody'),
+        fakeItem('off', 'Song Official Lyric Video'),
+      ])
+    )
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    expect(result.current.results[0].videoId).toBe('off')
+  })
+
+  it('ranks guide vocal karaoke above karaoke with lyrics only', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      mockApiResponse([
+        fakeItem('lyr', 'Song Karaoke with Lyrics'),
+        fakeItem('voc', 'Song Karaoke Guide Vocal'),
+      ])
+    )
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    expect(result.current.results[0].videoId).toBe('voc')
+  })
+
+  it('penalises "no guide" and "instrumental only" titles', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      mockApiResponse([
+        fakeItem('bad', 'Song Karaoke No Guide Melody Instrumental Only'),
+        fakeItem('good', 'Song Karaoke with Guide Melody'),
       ])
     )
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Song') })
     expect(result.current.results[0].videoId).toBe('good')
-  })
-
-  it('penalises "no guide" and "no vocal" titles', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      mockApiResponse([
-        fakeItem('ng', 'Song Karaoke No Guide Melody'),
-        fakeItem('wg', 'Song Karaoke with Guide Melody'),
-      ])
-    )
-    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
-    await act(async () => { await result.current.search('Song') })
-    expect(result.current.results[0].videoId).toBe('wg')
   })
 
   it('returns at most 8 results even when 20 are available', async () => {
