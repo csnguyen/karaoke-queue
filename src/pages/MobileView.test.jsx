@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import MobileView from './MobileView'
 
@@ -58,12 +58,14 @@ describe('MobileView', () => {
     expect(screen.getByText('Hotel California')).toBeInTheDocument()
   })
 
-  it('skip button is shown only when song is current', () => {
+  it('skip button is disabled when nothing is queued or playing', () => {
     renderMobile({ current: null, queue: [], history: [] })
-    expect(screen.queryByTestId('mobile-skip-btn')).not.toBeInTheDocument()
+    expect(screen.getByTestId('mobile-skip-btn')).toBeDisabled()
+  })
 
+  it('skip button is enabled when a song is current', () => {
     renderMobile({ current: song1, queue: [], history: [] })
-    expect(screen.getByTestId('mobile-skip-btn')).toBeInTheDocument()
+    expect(screen.getByTestId('mobile-skip-btn')).not.toBeDisabled()
   })
 
   it('search input value updates on change', () => {

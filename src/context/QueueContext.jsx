@@ -6,6 +6,7 @@ const initialState = {
   current: null,
   queue: [],
   history: [],
+  paused: false,
 }
 
 function loadFromStorage() {
@@ -39,11 +40,16 @@ function reducer(state, action) {
         ? [...state.history, state.current]
         : state.history
       return {
+        ...state,
         current: next,
         queue: state.queue.slice(1),
         history: newHistory,
+        paused: false,
       }
     }
+
+    case 'TOGGLE_PAUSE':
+      return { ...state, paused: !state.paused }
 
     case 'REMOVE_SONG':
       return { ...state, queue: state.queue.filter((s) => s.id !== action.id) }
@@ -101,9 +107,10 @@ export function QueueProvider({ children, initialStateOverride }) {
   const panicRecover = useCallback(() => dispatch({ type: 'PANIC_RECOVER' }), [])
   const restore = useCallback((s) => dispatch({ type: 'RESTORE', state: s }), [])
   const mergeRemoteSongs = useCallback((songs) => dispatch({ type: 'MERGE_REMOTE_SONGS', songs }), [])
+  const togglePause = useCallback(() => dispatch({ type: 'TOGGLE_PAUSE' }), [])
 
   return (
-    <QueueContext.Provider value={{ ...state, addSong, addNext, skip, removeSong, reorder, panicRecover, restore, mergeRemoteSongs }}>
+    <QueueContext.Provider value={{ ...state, addSong, addNext, skip, removeSong, reorder, panicRecover, restore, mergeRemoteSongs, togglePause }}>
       {children}
     </QueueContext.Provider>
   )

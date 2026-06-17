@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 
-export default function KaraokePlayer({ song, onSkip, autoplay = true }) {
+export default function KaraokePlayer({ song, onSkip, autoplay = true, externalPaused }) {
   const [playing, setPlaying] = useState(autoplay)
   const playerRef = useRef(null)
   const iframeRef = useRef(null)
@@ -24,6 +24,14 @@ export default function KaraokePlayer({ song, onSkip, autoplay = true }) {
   useEffect(() => {
     setPlaying(autoplay)
   }, [song?.id, autoplay])
+
+  // Respond to external play/pause commands (e.g. from mobile remote)
+  useEffect(() => {
+    if (externalPaused === undefined || externalPaused === null) return
+    const shouldPlay = !externalPaused
+    sendCommand(shouldPlay ? 'playVideo' : 'pauseVideo')
+    setPlaying(shouldPlay)
+  }, [externalPaused, sendCommand])
 
   useEffect(() => {
     const handleKey = (e) => {

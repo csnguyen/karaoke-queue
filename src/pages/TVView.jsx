@@ -6,12 +6,17 @@ import { useRoomSync } from '../hooks/useRoomSync'
 
 export default function TVView() {
   useMultiDeviceSync()
-  const { current, queue, skip } = useQueue()
+  const { current, queue, skip, paused } = useQueue()
   const { roomCode, syncError, createRoom } = useRoomSync()
 
   useEffect(() => {
     createRoom()
   }, [createRoom])
+
+  // Auto-advance when queue has songs but nothing is playing
+  useEffect(() => {
+    if (!current && queue.length > 0) skip()
+  }, [current, queue, skip])
 
   const queueText = queue.length > 0
     ? queue.map((s) => `${s.title} — ${s.artist}`).join('   ·   ')
@@ -20,7 +25,7 @@ export default function TVView() {
   return (
     <div className="min-h-screen bg-black flex flex-col" data-testid="tv-view">
       <div className="flex-1 relative">
-        <KaraokePlayer song={current} onSkip={skip} />
+        <KaraokePlayer song={current} onSkip={skip} externalPaused={paused} />
 
         {roomCode && (
           <div
