@@ -191,6 +191,35 @@ describe('useYouTubeSearch', () => {
     expect(result.current.error).toBeNull()
   })
 
+  it('exposes hasMore when nextPageToken is present', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeItem('v1', 'Song Karaoke')], nextPageToken: 'tok1' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeStats('v1')] }) })
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    expect(result.current.hasMore).toBe(true)
+  })
+
+  it('loadMore appends new results without duplicates', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      // first search
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeItem('v1', 'Song Karaoke')], nextPageToken: 'tok1' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeStats('v1')] }) })
+      // load more
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeItem('v1', 'Song Karaoke'), fakeItem('v2', 'Song 2 Karaoke')], nextPageToken: null }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeStats('v1'), fakeStats('v2')] }) })
+
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    expect(result.current.results).toHaveLength(1)
+
+    await act(async () => { await result.current.loadMore() })
+    // v1 deduped, v2 appended
+    expect(result.current.results).toHaveLength(2)
+    expect(result.current.results[1].videoId).toBe('v2')
+    expect(result.current.hasMore).toBe(false)
+  })
+
   it('clears previous results on new search', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeItem('v1', 'First Karaoke')] }) })

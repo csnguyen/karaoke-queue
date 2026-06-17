@@ -16,7 +16,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { useQueue } from '../context/QueueContext'
 import { useYouTubeSearch } from '../hooks/useYouTubeSearch'
-import { pushSongToRoom, useRoomPoll } from '../hooks/useRoomSync'
+import { pushSongToRoom, pushCommandToRoom, useRoomPoll } from '../hooks/useRoomSync'
 
 function formatCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -71,7 +71,7 @@ export default function MobileView() {
   const [activeRoom, setActiveRoom] = useState(null)
   const [roomError, setRoomError] = useState(null)
   const { current, queue, paused, addSong, addNext, removeSong, skip, reorder, togglePause } = useQueue()
-  const { results, loading, error, search } = useYouTubeSearch()
+  const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
   useRoomPoll(activeRoom)
 
   const sensors = useSensors(
@@ -115,6 +115,22 @@ export default function MobileView() {
     },
     [activeRoom, addSong, addNext]
   )
+
+  const handlePlayPause = useCallback(async () => {
+    if (activeRoom) {
+      const cmd = paused ? 'resume' : 'pause'
+      try { await pushCommandToRoom(activeRoom, cmd) } catch { }
+    }
+    togglePause()
+  }, [activeRoom, paused, togglePause])
+
+  const handleSkip = useCallback(async () => {
+    if (activeRoom) {
+      try { await pushCommandToRoom(activeRoom, 'skip') } catch { }
+    } else {
+      skip()
+    }
+  }, [activeRoom, skip])
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
@@ -211,6 +227,16 @@ export default function MobileView() {
               </li>
             ))}
           </ul>
+          {hasMore && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="w-full mt-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              data-testid="load-more-btn"
+            >
+              {loadingMore ? 'Loading…' : 'Load more results'}
+            </button>
+          )}
         </section>
       )}
 
@@ -229,20 +255,20 @@ export default function MobileView() {
           <p className="text-gray-600 text-sm mb-3" data-testid="nothing-playing">Nothing playing</p>
         )}
 
-        {/* Playback controls */}
+        {/* Playback controls — when in a room these act as a TV remote */}
         <div className="flex items-center justify-center gap-4 mb-4" data-testid="playback-controls">
           <button
-            onClick={togglePause}
-            disabled={!current}
+            onClick={handlePlayPause}
+            disabled={!activeRoom && !current}
             className="flex items-center justify-center w-14 h-14 rounded-full bg-purple-600 hover:bg-purple-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-2xl"
             aria-label={paused ? 'Play' : 'Pause'}
             data-testid="mobile-play-pause-btn"
           >
-            {paused || !current ? '▶' : '⏸'}
+            {paused ? '▶' : '⏸'}
           </button>
           <button
-            onClick={skip}
-            disabled={!current && queue.length === 0}
+            onClick={handleSkip}
+            disabled={!activeRoom && !current && queue.length === 0}
             className="flex items-center justify-center w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xl"
             aria-label="Next"
             data-testid="mobile-skip-btn"

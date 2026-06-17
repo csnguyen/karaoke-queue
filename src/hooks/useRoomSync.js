@@ -7,6 +7,7 @@ export const POLL_INTERVAL_MS = 2500
 // Used by both TVView (after createRoom) and MobileView (after joining a room).
 export function useRoomPoll(roomCode) {
   const [syncError, setSyncError] = useState(null)
+  const [lastCommand, setLastCommand] = useState(null)
   const { mergeRemoteSongs } = useQueue()
   const intervalRef = useRef(null)
   const activeRef = useRef(true)
@@ -19,9 +20,10 @@ export function useRoomPoll(roomCode) {
       try {
         const res = await fetch(`/api/get-room?code=${encodeURIComponent(roomCode)}`)
         if (!res.ok) throw new Error(`Sync failed: ${res.status}`)
-        const { songs } = await res.json()
+        const { songs, command } = await res.json()
         if (activeRef.current) {
           mergeRemoteSongs(songs ?? [])
+          if (command) setLastCommand(command)
           setSyncError(null)
         }
       } catch (err) {
@@ -37,13 +39,13 @@ export function useRoomPoll(roomCode) {
     }
   }, [roomCode, mergeRemoteSongs])
 
-  return { syncError }
+  return { syncError, lastCommand }
 }
 
 export function useRoomSync() {
   const [roomCode, setRoomCode] = useState(null)
   const [createError, setCreateError] = useState(null)
-  const { syncError: pollError } = useRoomPoll(roomCode)
+  const { syncError: pollError, lastCommand } = useRoomPoll(roomCode)
   const syncError = createError ?? pollError
 
   const createRoom = useCallback(async () => {
@@ -60,7 +62,20 @@ export function useRoomSync() {
     }
   }, [])
 
-  return { roomCode, syncError, createRoom }
+  return { roomCode, syncError, createRoom, lastCommand }
+}
+
+export async function pushCommandToRoom(roomCode, command) {
+  const res = await fetch('/api/push-command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roomCode, command }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? `push-command failed: ${res.status}`)
+  }
+  return res.json()
 }
 
 export async function pushSongToRoom(roomCode, songData, singerName = '') {

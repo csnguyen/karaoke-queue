@@ -51,6 +51,9 @@ function reducer(state, action) {
     case 'TOGGLE_PAUSE':
       return { ...state, paused: !state.paused }
 
+    case 'SET_PAUSED':
+      return { ...state, paused: action.paused }
+
     case 'REMOVE_SONG':
       return { ...state, queue: state.queue.filter((s) => s.id !== action.id) }
 
@@ -121,10 +124,11 @@ export function QueueProvider({ children, initialStateOverride }) {
   const restore = useCallback((s) => dispatch({ type: 'RESTORE', state: s }), [])
   const mergeRemoteSongs = useCallback((songs) => dispatch({ type: 'MERGE_REMOTE_SONGS', songs }), [])
   const togglePause = useCallback(() => dispatch({ type: 'TOGGLE_PAUSE' }), [])
+  const setPaused = useCallback((paused) => dispatch({ type: 'SET_PAUSED', paused }), [])
   const skipTo = useCallback((index) => dispatch({ type: 'SKIP_TO', index }), [])
 
   return (
-    <QueueContext.Provider value={{ ...state, addSong, addNext, skip, skipTo, removeSong, reorder, panicRecover, restore, mergeRemoteSongs, togglePause }}>
+    <QueueContext.Provider value={{ ...state, addSong, addNext, skip, skipTo, removeSong, reorder, panicRecover, restore, mergeRemoteSongs, togglePause, setPaused }}>
       {children}
     </QueueContext.Provider>
   )

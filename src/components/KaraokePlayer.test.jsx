@@ -98,4 +98,28 @@ describe('KaraokePlayer', () => {
     const iframe = screen.getByTestId('youtube-iframe')
     expect(iframe.src).toContain('autoplay=1')
   })
+
+  it('calls onSkip when YouTube sends onStateChange:0 (video ended)', () => {
+    const onSkip = vi.fn()
+    render(<KaraokePlayer song={mockSong} onSkip={onSkip} />)
+    const iframe = screen.getByTestId('youtube-iframe')
+    // Simulate the postMessage YouTube sends when the video ends
+    fireEvent(window, new MessageEvent('message', {
+      data: JSON.stringify({ event: 'onStateChange', info: 0 }),
+      source: iframe.contentWindow,
+    }))
+    expect(onSkip).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call onSkip for other YouTube state changes', () => {
+    const onSkip = vi.fn()
+    render(<KaraokePlayer song={mockSong} onSkip={onSkip} />)
+    const iframe = screen.getByTestId('youtube-iframe')
+    // state 1 = playing, should not trigger skip
+    fireEvent(window, new MessageEvent('message', {
+      data: JSON.stringify({ event: 'onStateChange', info: 1 }),
+      source: iframe.contentWindow,
+    }))
+    expect(onSkip).not.toHaveBeenCalled()
+  })
 })

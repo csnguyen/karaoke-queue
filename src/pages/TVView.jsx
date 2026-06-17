@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import KaraokePlayer from '../components/KaraokePlayer'
 import { useQueue } from '../context/QueueContext'
 import { useMultiDeviceSync } from '../hooks/useMultiDeviceSync'
@@ -6,8 +6,10 @@ import { useRoomSync } from '../hooks/useRoomSync'
 
 export default function TVView() {
   useMultiDeviceSync() // safe now — uses mergeRemoteSongs, never overwrites current
-  const { current, queue, skip, skipTo, paused } = useQueue()
-  const { roomCode, syncError, createRoom } = useRoomSync()
+  const { current, queue, skip, skipTo, paused, setPaused } = useQueue()
+  const { roomCode, syncError, createRoom, lastCommand } = useRoomSync()
+  // Only process commands pushed after this TV session started
+  const lastSeqRef = useRef(Date.now())
 
   useEffect(() => {
     createRoom()
@@ -17,6 +19,15 @@ export default function TVView() {
   useEffect(() => {
     if (!current && queue.length > 0) skip()
   }, [current, queue, skip])
+
+  // Process remote commands from mobile devices
+  useEffect(() => {
+    if (!lastCommand || lastCommand.seq <= lastSeqRef.current) return
+    lastSeqRef.current = lastCommand.seq
+    if (lastCommand.type === 'skip') skip()
+    else if (lastCommand.type === 'pause') setPaused(true)
+    else if (lastCommand.type === 'resume') setPaused(false)
+  }, [lastCommand, skip, setPaused])
 
   return (
     <div className="min-h-screen bg-black flex flex-col" data-testid="tv-view">

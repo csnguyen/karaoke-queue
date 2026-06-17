@@ -4,6 +4,8 @@ export default function KaraokePlayer({ song, onSkip, autoplay = true, externalP
   const [playing, setPlaying] = useState(autoplay)
   const playerRef = useRef(null)
   const iframeRef = useRef(null)
+  const onSkipRef = useRef(onSkip)
+  useEffect(() => { onSkipRef.current = onSkip }, [onSkip])
 
   const sendCommand = useCallback((func, args = []) => {
     iframeRef.current?.contentWindow?.postMessage(
@@ -32,6 +34,21 @@ export default function KaraokePlayer({ song, onSkip, autoplay = true, externalP
     sendCommand(shouldPlay ? 'playVideo' : 'pauseVideo')
     setPlaying(shouldPlay)
   }, [externalPaused, sendCommand])
+
+  // Auto-advance when YouTube signals the video has ended (playerState === 0)
+  useEffect(() => {
+    const handleMessage = (e) => {
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return
+      try {
+        const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data
+        if (data.event === 'onStateChange' && data.info === 0) {
+          onSkipRef.current?.()
+        }
+      } catch {}
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [])
 
   useEffect(() => {
     const handleKey = (e) => {
