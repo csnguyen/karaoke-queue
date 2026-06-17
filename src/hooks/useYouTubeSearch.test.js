@@ -2,20 +2,32 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useYouTubeSearch } from './useYouTubeSearch'
 
+// Search result item with thumbnail
 const fakeItem = (id, title, channel = 'SingChannel') => ({
   id: { videoId: id },
-  snippet: { title, channelTitle: channel },
+  snippet: {
+    title,
+    channelTitle: channel,
+    thumbnails: { medium: { url: `https://img.youtube.com/vi/${id}/mqdefault.jpg` } },
+  },
 })
 
-const mockApiResponse = (items) => ({
-  ok: true,
-  json: async () => ({ items }),
+// Statistics item
+const fakeStats = (id, viewCount = 0, likeCount = 0) => ({
+  id,
+  statistics: { viewCount: String(viewCount), likeCount: String(likeCount) },
 })
+
+// Mock both the search call and the stats call
+function mockBoth(items, statsItems = []) {
+  const spy = vi.spyOn(globalThis, 'fetch')
+  spy.mockResolvedValueOnce({ ok: true, json: async () => ({ items }) })
+  spy.mockResolvedValueOnce({ ok: true, json: async () => ({ items: statsItems }) })
+  return spy
+}
 
 describe('useYouTubeSearch', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks()
-  })
+  beforeEach(() => { vi.restoreAllMocks() })
 
   it('starts with empty results, not loading, no error', () => {
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
@@ -24,88 +36,130 @@ describe('useYouTubeSearch', () => {
     expect(result.current.error).toBeNull()
   })
 
-  it('maps YouTube API items to song shape without _score field', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      mockApiResponse([fakeItem('vid1', 'My Song Karaoke')])
+  it('result shape includes thumbnail, viewCount, likeCount and omits _score', async () => {
+    mockBoth(
+      [fakeItem('vid1', 'My Song Karaoke')],
+      [fakeStats('vid1', 1000, 50)],
     )
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('My Song') })
 
-    expect(result.current.results).toEqual([
-      { id: 'vid1', videoId: 'vid1', title: 'My Song Karaoke', artist: 'SingChannel' },
-    ])
-    expect(result.current.results[0]).not.toHaveProperty('_score')
+    const r = result.current.results[0]
+    expect(r.id).toBe('vid1')
+    expect(r.videoId).toBe('vid1')
+    expect(r.title).toBe('My Song Karaoke')
+    expect(r.artist).toBe('SingChannel')
+    expect(r.thumbnail).toBe('https://img.youtube.com/vi/vid1/mqdefault.jpg')
+    expect(r.viewCount).toBe(1000)
+    expect(r.likeCount).toBe(50)
+    expect(r).not.toHaveProperty('_score')
   })
 
   it('appends "karaoke" to the search query', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockApiResponse([]))
+    const spy = mockBoth([])
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Bohemian Rhapsody') })
     expect(spy.mock.calls[0][0]).toContain('Bohemian+Rhapsody+karaoke')
   })
 
-  it('sends videoEmbeddable=true so only iframe-playable results are returned', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockApiResponse([]))
+  it('sends videoEmbeddable=true', async () => {
+    const spy = mockBoth([])
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('test') })
     expect(spy.mock.calls[0][0]).toContain('videoEmbeddable=true')
   })
 
   it('restricts to Music category (videoCategoryId=10)', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockApiResponse([]))
+    const spy = mockBoth([])
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('test') })
     expect(spy.mock.calls[0][0]).toContain('videoCategoryId=10')
   })
 
-  it('fetches 20 candidates to give scoring room to work', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockApiResponse([]))
+  it('fetches 20 candidates', async () => {
+    const spy = mockBoth([])
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('test') })
     expect(spy.mock.calls[0][0]).toContain('maxResults=20')
   })
 
-  it('ranks official lyric video above karaoke with guide vocal', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      mockApiResponse([
-        fakeItem('kar', 'Song Karaoke with Guide Melody'),
-        fakeItem('off', 'Song Official Lyric Video'),
-      ])
+  it('makes a second fetch for statistics with all video IDs', async () => {
+    const spy = mockBoth([fakeItem('v1', 'Song A Karaoke'), fakeItem('v2', 'Song B Karaoke')])
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    const statsCall = spy.mock.calls[1][0]
+    expect(statsCall).toContain('youtube/v3/videos')
+    expect(statsCall).toContain('statistics')
+    expect(statsCall).toContain('v1')
+    expect(statsCall).toContain('v2')
+  })
+
+  it('higher view/like count lifts a video when karaoke scores are equal', async () => {
+    mockBoth(
+      [fakeItem('low', 'Song Karaoke'), fakeItem('high', 'Song Karaoke')],
+      [fakeStats('low', 1_000, 10), fakeStats('high', 10_000_000, 500_000)],
+    )
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    expect(result.current.results[0].videoId).toBe('high')
+  })
+
+  it('karaoke and lyrics are equal — karaoke+lyrics beats either alone', async () => {
+    mockBoth(
+      [
+        fakeItem('kar', 'Song Karaoke'),
+        fakeItem('lyr', 'Song with Lyrics'),
+        fakeItem('both', 'Song Karaoke with Lyrics'),
+      ],
+      [fakeStats('kar', 0, 0), fakeStats('lyr', 0, 0), fakeStats('both', 0, 0)],
+    )
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    // karaoke+lyrics combo wins; plain karaoke and plain lyrics tie for second
+    expect(result.current.results[0].videoId).toBe('both')
+  })
+
+  it('ranks karaoke+lyrics+official above karaoke+lyrics without official', async () => {
+    mockBoth(
+      [fakeItem('noo', 'Song Karaoke with Lyrics'), fakeItem('off', 'Song Official Karaoke with Lyrics')],
+      [fakeStats('noo', 0, 0), fakeStats('off', 0, 0)],
     )
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Song') })
     expect(result.current.results[0].videoId).toBe('off')
   })
 
-  it('ranks guide vocal karaoke above karaoke with lyrics only', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      mockApiResponse([
-        fakeItem('lyr', 'Song Karaoke with Lyrics'),
-        fakeItem('voc', 'Song Karaoke Guide Vocal'),
-      ])
+  it('ranks karaoke+lyrics+official+vocals as the top result', async () => {
+    mockBoth(
+      [
+        fakeItem('a', 'Song Karaoke'),
+        fakeItem('b', 'Song Karaoke with Lyrics'),
+        fakeItem('c', 'Song Official Karaoke with Lyrics Guide Vocal'),
+      ],
+      [fakeStats('a', 0, 0), fakeStats('b', 0, 0), fakeStats('c', 0, 0)],
     )
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Song') })
-    expect(result.current.results[0].videoId).toBe('voc')
+    expect(result.current.results[0].videoId).toBe('c')
   })
 
   it('penalises "no guide" and "instrumental only" titles', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      mockApiResponse([
-        fakeItem('bad', 'Song Karaoke No Guide Melody Instrumental Only'),
-        fakeItem('good', 'Song Karaoke with Guide Melody'),
-      ])
+    mockBoth(
+      [
+        fakeItem('bad',  'Song Karaoke No Guide Melody Instrumental Only'),
+        fakeItem('good', 'Song Karaoke with Lyrics'),
+      ],
+      [fakeStats('bad', 0, 0), fakeStats('good', 0, 0)],
     )
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Song') })
     expect(result.current.results[0].videoId).toBe('good')
   })
 
-  it('returns at most 8 results even when 20 are available', async () => {
-    const items = Array.from({ length: 20 }, (_, i) =>
-      fakeItem(`v${i}`, `Song ${i} Karaoke`)
-    )
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockApiResponse(items))
+  it('returns at most 8 results when 20 candidates are available', async () => {
+    const items = Array.from({ length: 20 }, (_, i) => fakeItem(`v${i}`, `Song ${i} Karaoke`))
+    const stats = items.map((_, i) => fakeStats(`v${i}`))
+    mockBoth(items, stats)
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('Song') })
     expect(result.current.results).toHaveLength(8)
@@ -115,10 +169,9 @@ describe('useYouTubeSearch', () => {
     const { result } = renderHook(() => useYouTubeSearch(undefined))
     await act(async () => { await result.current.search('something') })
     expect(result.current.error).toMatch(/api key/i)
-    expect(result.current.results).toEqual([])
   })
 
-  it('sets error when fetch returns non-ok response', async () => {
+  it('sets error when search fetch returns non-ok response', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: false, status: 403 })
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('test') })
@@ -132,8 +185,8 @@ describe('useYouTubeSearch', () => {
     expect(result.current.error).toBe('Network down')
   })
 
-  it('handles empty items array', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockApiResponse([]))
+  it('handles empty items array gracefully', async () => {
+    mockBoth([])
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('obscure song') })
     expect(result.current.results).toEqual([])
@@ -142,15 +195,27 @@ describe('useYouTubeSearch', () => {
 
   it('clears previous results on new search', async () => {
     vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(mockApiResponse([fakeItem('v1', 'First Karaoke')]))
-      .mockResolvedValueOnce(mockApiResponse([fakeItem('v2', 'Second Karaoke')]))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeItem('v1', 'First Karaoke')] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeStats('v1')] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeItem('v2', 'Second Karaoke')] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeStats('v2')] }) })
 
     const { result } = renderHook(() => useYouTubeSearch('fake-key'))
     await act(async () => { await result.current.search('first') })
     expect(result.current.results).toHaveLength(1)
-
     await act(async () => { await result.current.search('second') })
     expect(result.current.results).toHaveLength(1)
     expect(result.current.results[0].title).toBe('Second Karaoke')
+  })
+
+  it('gracefully continues if stats fetch fails', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [fakeItem('v1', 'Song Karaoke')] }) })
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    // Search results still returned, just without view/like boost
+    expect(result.current.results).toHaveLength(1)
+    expect(result.current.error).toBeNull()
   })
 })

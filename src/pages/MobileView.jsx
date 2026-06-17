@@ -18,6 +18,12 @@ import { useQueue } from '../context/QueueContext'
 import { useYouTubeSearch } from '../hooks/useYouTubeSearch'
 import { pushSongToRoom } from '../hooks/useRoomSync'
 
+function formatCount(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
+  return String(n)
+}
+
 function SortableQueueItem({ song, index, onRemove }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: song.id })
@@ -162,25 +168,45 @@ export default function MobileView() {
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Results</h2>
           <ul className="space-y-2" data-testid="search-results">
             {results.map((song) => (
-              <li key={song.id} className="flex items-center gap-3 bg-gray-800 rounded-lg p-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{song.title}</p>
-                  <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+              <li key={song.id} className="bg-gray-800 rounded-lg overflow-hidden">
+                {/* Top row: thumbnail + title/meta */}
+                <div className="flex items-start gap-3 p-3">
+                  {song.thumbnail ? (
+                    <img
+                      src={song.thumbnail}
+                      alt=""
+                      className="w-28 h-[63px] object-cover rounded shrink-0"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-28 h-[63px] bg-gray-700 rounded shrink-0 flex items-center justify-center text-gray-600 text-2xl">♪</div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {/* No truncate — title wraps so full text is readable */}
+                    <p className="font-medium text-sm leading-snug text-white">{song.title}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{song.artist}</p>
+                    {song.viewCount > 0 && (
+                      <p className="text-xs text-gray-600 mt-0.5">{formatCount(song.viewCount)} views</p>
+                    )}
+                  </div>
                 </div>
-                <button
-                  onClick={() => pushSong(song, 'next')}
-                  className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 text-xs rounded-full font-medium transition-colors whitespace-nowrap"
-                  aria-label={`Play ${song.title} next`}
-                >
-                  Play Next
-                </button>
-                <button
-                  onClick={() => pushSong(song, 'queue')}
-                  className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded-full font-medium transition-colors whitespace-nowrap"
-                  aria-label={`Add ${song.title} to queue`}
-                >
-                  + Queue
-                </button>
+                {/* Bottom row: action buttons */}
+                <div className="flex gap-2 px-3 pb-3">
+                  <button
+                    onClick={() => pushSong(song, 'next')}
+                    className="flex-1 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-xs rounded-full font-medium transition-colors"
+                    aria-label={`Play ${song.title} next`}
+                  >
+                    ▶ Play Next
+                  </button>
+                  <button
+                    onClick={() => pushSong(song, 'queue')}
+                    className="flex-1 py-1.5 bg-purple-600 hover:bg-purple-700 text-xs rounded-full font-medium transition-colors"
+                    aria-label={`Add ${song.title} to queue`}
+                  >
+                    + Add to Queue
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
