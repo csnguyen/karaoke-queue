@@ -71,6 +71,19 @@ function reducer(state, action) {
     case 'RESTORE':
       return action.state
 
+    case 'SKIP_TO': {
+      const { index } = action
+      if (index < 0 || index >= state.queue.length) return state
+      const target = state.queue[index]
+      const skipped = state.queue.slice(0, index)
+      const remaining = state.queue.slice(index + 1)
+      const newHistory = [
+        ...(state.current ? [...state.history, state.current] : state.history),
+        ...skipped,
+      ]
+      return { ...state, current: target, queue: remaining, history: newHistory, paused: false }
+    }
+
     case 'MERGE_REMOTE_SONGS': {
       const seen = new Set([
         ...(state.current ? [state.current.id] : []),
@@ -108,9 +121,10 @@ export function QueueProvider({ children, initialStateOverride }) {
   const restore = useCallback((s) => dispatch({ type: 'RESTORE', state: s }), [])
   const mergeRemoteSongs = useCallback((songs) => dispatch({ type: 'MERGE_REMOTE_SONGS', songs }), [])
   const togglePause = useCallback(() => dispatch({ type: 'TOGGLE_PAUSE' }), [])
+  const skipTo = useCallback((index) => dispatch({ type: 'SKIP_TO', index }), [])
 
   return (
-    <QueueContext.Provider value={{ ...state, addSong, addNext, skip, removeSong, reorder, panicRecover, restore, mergeRemoteSongs, togglePause }}>
+    <QueueContext.Provider value={{ ...state, addSong, addNext, skip, skipTo, removeSong, reorder, panicRecover, restore, mergeRemoteSongs, togglePause }}>
       {children}
     </QueueContext.Provider>
   )

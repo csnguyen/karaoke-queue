@@ -1,13 +1,13 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import TVView from './TVView'
 
 const song1 = { id: '1', title: 'Bohemian Rhapsody', artist: 'Queen', videoId: 'vid1' }
 const song2 = { id: '2', title: 'Hotel California', artist: 'Eagles', videoId: 'vid2' }
+const song3 = { id: '3', title: 'Yesterday', artist: 'Beatles', videoId: 'vid3' }
 
-// Stub fetch so useRoomSync's createRoom + poll don't fail in jsdom
 beforeEach(() => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok: true,
@@ -45,23 +45,32 @@ describe('TVView', () => {
     expect(screen.getByTestId('queue-empty-bar')).toBeInTheDocument()
   })
 
-  it('shows marquee-bar when queue has songs', () => {
+  it('shows tv-queue-list when queue has songs', () => {
     renderTV({ current: song1, queue: [song2], history: [] })
-    expect(screen.getByTestId('marquee-bar')).toBeInTheDocument()
+    expect(screen.getByTestId('tv-queue-list')).toBeInTheDocument()
   })
 
-  it('marquee contains queued song title and artist', () => {
-    renderTV({ current: song1, queue: [song2], history: [] })
-    const marquee = screen.getByTestId('queue-marquee')
-    expect(marquee.textContent).toContain('Hotel California')
-    expect(marquee.textContent).toContain('Eagles')
-  })
-
-  it('marquee lists multiple queued songs', () => {
-    const song3 = { id: '3', title: 'Yesterday', artist: 'Beatles', videoId: 'vid3' }
+  it('renders all queued songs in the queue panel', () => {
     renderTV({ current: song1, queue: [song2, song3], history: [] })
-    const marquee = screen.getByTestId('queue-marquee')
-    expect(marquee.textContent).toContain('Hotel California')
-    expect(marquee.textContent).toContain('Yesterday')
+    expect(screen.getByText('Hotel California')).toBeInTheDocument()
+    expect(screen.getByText('Yesterday')).toBeInTheDocument()
+  })
+
+  it('each queue item has a Play Now button', () => {
+    renderTV({ current: song1, queue: [song2, song3], history: [] })
+    expect(screen.getByTestId('tv-play-btn-0')).toBeInTheDocument()
+    expect(screen.getByTestId('tv-play-btn-1')).toBeInTheDocument()
+  })
+
+  it('clicking Play Now on a queue item makes it the current song', () => {
+    renderTV({ current: song1, queue: [song2, song3], history: [] })
+    fireEvent.click(screen.getByTestId('tv-play-btn-0'))
+    // song2 should now be playing — its title appears in the player controls
+    expect(screen.getByText('Hotel California')).toBeInTheDocument()
+  })
+
+  it('shows queue count in the panel header', () => {
+    renderTV({ current: song1, queue: [song2, song3], history: [] })
+    expect(screen.getByText(/Up Next — 2 songs/i)).toBeInTheDocument()
   })
 })

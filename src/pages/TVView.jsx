@@ -1,30 +1,29 @@
 import React, { useEffect } from 'react'
 import KaraokePlayer from '../components/KaraokePlayer'
 import { useQueue } from '../context/QueueContext'
-import { useMultiDeviceSync } from '../hooks/useMultiDeviceSync'
 import { useRoomSync } from '../hooks/useRoomSync'
 
 export default function TVView() {
-  useMultiDeviceSync()
-  const { current, queue, skip, paused } = useQueue()
+  // useMultiDeviceSync removed — it called restore() which overwrote current whenever
+  // mobile updated localStorage (mobile state has current:null), stopping playback.
+  // KV polling via useRoomSync handles cross-device sync without touching current.
+  const { current, queue, skip, skipTo, paused } = useQueue()
   const { roomCode, syncError, createRoom } = useRoomSync()
 
   useEffect(() => {
     createRoom()
   }, [createRoom])
 
-  // Auto-advance when queue has songs but nothing is playing
+  // Auto-advance only when nothing is playing and queue is non-empty
   useEffect(() => {
     if (!current && queue.length > 0) skip()
   }, [current, queue, skip])
 
-  const queueText = queue.length > 0
-    ? queue.map((s) => `${s.title} — ${s.artist}`).join('   ·   ')
-    : null
-
   return (
     <div className="min-h-screen bg-black flex flex-col" data-testid="tv-view">
-      <div className="flex-1 relative">
+
+      {/* Player */}
+      <div className="relative">
         <KaraokePlayer song={current} onSkip={skip} externalPaused={paused} />
 
         {roomCode && (
@@ -46,25 +45,49 @@ export default function TVView() {
         )}
       </div>
 
-      {queueText ? (
-        <div className="bg-gray-900 border-t border-gray-700 py-2 overflow-hidden" data-testid="marquee-bar">
-          <p className="text-xs text-gray-500 uppercase tracking-widest px-4 mb-1">Up Next</p>
-          <div className="overflow-hidden">
-            <p
-              className="whitespace-nowrap animate-marquee text-white text-sm"
-              data-testid="queue-marquee"
-            >
-              {queueText}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-gray-900 border-t border-gray-700 py-3 px-4 text-center" data-testid="queue-empty-bar">
-          <p className="text-gray-500 text-sm">
-            Queue is empty — enter room code <strong className="text-purple-400">{roomCode ?? '…'}</strong> on your phone to add songs
+      {/* Queue panel */}
+      <div className="flex-1 bg-gray-900 border-t border-gray-700 overflow-hidden flex flex-col">
+        <div className="px-4 pt-3 pb-2 flex items-center justify-between shrink-0">
+          <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold">
+            Up Next — {queue.length} song{queue.length !== 1 ? 's' : ''}
           </p>
+          {!current && queue.length === 0 && (
+            <p className="text-gray-600 text-xs">
+              Enter room code <span className="text-purple-400 font-mono font-bold">{roomCode ?? '…'}</span> on your phone to add songs
+            </p>
+          )}
         </div>
-      )}
+
+        {queue.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center" data-testid="queue-empty-bar">
+            <p className="text-gray-700 text-sm">Queue is empty</p>
+          </div>
+        ) : (
+          <ul className="overflow-y-auto flex-1 px-4 pb-4 space-y-2" data-testid="tv-queue-list">
+            {queue.map((song, i) => (
+              <li
+                key={song.id}
+                className="flex items-center gap-3 bg-gray-800 hover:bg-gray-750 rounded-lg px-4 py-3"
+              >
+                <span className="text-gray-600 text-sm w-5 text-center shrink-0">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm truncate">{song.title}</p>
+                  <p className="text-gray-400 text-xs truncate">{song.artist}</p>
+                </div>
+                <button
+                  onClick={() => skipTo(i)}
+                  className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-full transition-colors whitespace-nowrap shrink-0"
+                  aria-label={`Play ${song.title} now`}
+                  data-testid={`tv-play-btn-${i}`}
+                >
+                  ▶ Play Now
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
     </div>
   )
 }
