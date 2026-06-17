@@ -29,6 +29,16 @@ export default function TVView() {
     else if (lastCommand.type === 'resume') setPaused(false)
   }, [lastCommand, skip, setPaused])
 
+  // Push current song to KV so all mobile clients show Now Playing
+  useEffect(() => {
+    if (!roomCode) return
+    fetch('/api/set-current', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomCode, song: current ?? null }),
+    }).catch(() => {})
+  }, [current, roomCode])
+
   return (
     <div className="min-h-screen bg-black flex flex-col" data-testid="tv-view">
 

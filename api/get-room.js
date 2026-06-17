@@ -12,15 +12,14 @@ export default async function handler(req, res) {
   if (!meta) {
     return res.status(404).json({ error: 'Room not found or expired' })
   }
-  const [raw, commandRaw] = await Promise.all([
+  const [raw, commandRaw, currentRaw] = await Promise.all([
     kv.lrange(`room:${code}:songs`, 0, -1),
     kv.get(`room:${code}:command`),
+    kv.get(`room:${code}:current`),
   ])
-  const songs = (raw ?? []).map((item) => {
-    try { return typeof item === 'string' ? JSON.parse(item) : item } catch { return null }
-  }).filter(Boolean)
-  const command = commandRaw
-    ? (typeof commandRaw === 'string' ? JSON.parse(commandRaw) : commandRaw)
-    : null
-  res.status(200).json({ songs, command })
+  const parse = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : v } catch { return null } }
+  const songs = (raw ?? []).map(parse).filter(Boolean)
+  const command = commandRaw ? parse(commandRaw) : null
+  const current = currentRaw !== undefined && currentRaw !== null ? parse(currentRaw) : undefined
+  res.status(200).json({ songs, command, current })
 }

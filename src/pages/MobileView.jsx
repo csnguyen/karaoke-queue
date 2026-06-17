@@ -72,7 +72,9 @@ export default function MobileView() {
   const [roomError, setRoomError] = useState(null)
   const { current, queue, paused, addSong, addNext, removeSong, skip, reorder, togglePause } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
-  useRoomPoll(activeRoom)
+  const { tvCurrent } = useRoomPoll(activeRoom)
+  // When in a room, show what TV is playing; fall back to local current otherwise
+  const nowPlaying = activeRoom ? (tvCurrent ?? null) : current
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -246,10 +248,10 @@ export default function MobileView() {
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Now Playing</h2>
         </div>
 
-        {current ? (
+        {nowPlaying ? (
           <div className="bg-purple-900/40 border border-purple-700 rounded-lg p-3 mb-3" data-testid="now-playing">
-            <p className="font-semibold text-sm truncate">{current.title}</p>
-            <p className="text-xs text-gray-400 truncate">{current.artist}</p>
+            <p className="font-semibold text-sm truncate">{nowPlaying.title}</p>
+            <p className="text-xs text-gray-400 truncate">{nowPlaying.artist}</p>
           </div>
         ) : (
           <p className="text-gray-600 text-sm mb-3" data-testid="nothing-playing">Nothing playing</p>
@@ -277,8 +279,8 @@ export default function MobileView() {
           </button>
         </div>
 
-        {/* Start Playing button when queue has songs but nothing playing */}
-        {!current && queue.length > 0 && (
+        {/* Start Playing button when queue has songs but nothing playing (local only) */}
+        {!current && !activeRoom && queue.length > 0 && (
           <button
             onClick={skip}
             className="w-full mb-4 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold text-sm transition-colors"

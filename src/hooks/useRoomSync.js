@@ -8,6 +8,7 @@ export const POLL_INTERVAL_MS = 2500
 export function useRoomPoll(roomCode) {
   const [syncError, setSyncError] = useState(null)
   const [lastCommand, setLastCommand] = useState(null)
+  const [tvCurrent, setTvCurrent] = useState(undefined)
   const { mergeRemoteSongs } = useQueue()
   const intervalRef = useRef(null)
   const activeRef = useRef(true)
@@ -20,10 +21,12 @@ export function useRoomPoll(roomCode) {
       try {
         const res = await fetch(`/api/get-room?code=${encodeURIComponent(roomCode)}`)
         if (!res.ok) throw new Error(`Sync failed: ${res.status}`)
-        const { songs, command } = await res.json()
+        const { songs, command, current } = await res.json()
         if (activeRef.current) {
           mergeRemoteSongs(songs ?? [])
           if (command) setLastCommand(command)
+          // current is only present once TV has set it (undefined = not yet set)
+          if (current !== undefined) setTvCurrent(current)
           setSyncError(null)
         }
       } catch (err) {
@@ -39,7 +42,7 @@ export function useRoomPoll(roomCode) {
     }
   }, [roomCode, mergeRemoteSongs])
 
-  return { syncError, lastCommand }
+  return { syncError, lastCommand, tvCurrent }
 }
 
 export function useRoomSync() {
