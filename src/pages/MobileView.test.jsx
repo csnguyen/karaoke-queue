@@ -71,14 +71,16 @@ describe('MobileView', () => {
     expect(screen.getByText('Hotel California')).toBeInTheDocument()
   })
 
-  it('skip button is disabled when nothing is queued or playing', () => {
-    renderMobile({ current: null, queue: [], history: [] })
-    expect(screen.getByTestId('mobile-skip-btn')).toBeDisabled()
+  it('has no Next Song control (TV only)', () => {
+    renderMobile({ current: song1, queue: [song2], history: [] })
+    expect(screen.queryByTestId('mobile-skip-btn')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /next song/i })).not.toBeInTheDocument()
   })
 
-  it('skip button is enabled when a song is current', () => {
-    renderMobile({ current: song1, queue: [], history: [] })
-    expect(screen.getByTestId('mobile-skip-btn')).not.toBeDisabled()
+  it('shows the app name and sets the page title', () => {
+    renderMobile({ current: null, queue: [], history: [] })
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Noe Noraebang')
+    expect(document.title).toBe('Noe Noraebang')
   })
 
   it('search input value updates on change', () => {

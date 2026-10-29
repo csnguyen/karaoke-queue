@@ -79,6 +79,12 @@ describe('TVView', () => {
     expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Bohemian Rhapsody')
   })
 
+  it('shows the app name and sets the TV page title', () => {
+    renderTV({ current: null, queue: [], history: [] })
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Noe Noraebang')
+    expect(document.title).toBe('Noe Noraebang - TV')
+  })
+
   it('shows the singer name in Now Playing', () => {
     renderTV({ current: { ...song1, singerName: 'Alex' }, queue: [], history: [] })
     expect(screen.getByTestId('tv-now-singer')).toHaveTextContent('Alex')

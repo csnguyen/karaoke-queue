@@ -16,7 +16,8 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { useQueue } from '../context/QueueContext'
 import { useYouTubeSearch } from '../hooks/useYouTubeSearch'
-import { pushSongToRoom, pushCommandToRoom, useRoomPoll } from '../hooks/useRoomSync'
+import { pushSongToRoom, useRoomPoll } from '../hooks/useRoomSync'
+import { APP_NAME } from '../appName'
 
 const SINGER_STORAGE_KEY = 'karaoke-singer-name'
 const SINGER_MAX_LENGTH = 30
@@ -113,7 +114,7 @@ export default function MobileView() {
   }, [])
 
   useEffect(() => () => clearTimeout(toastTimerRef.current), [])
-  const { current, queue, addSong, addNext, removeSong, skip, reorder } = useQueue()
+  const { current, queue, addSong, addNext, removeSong, reorder } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
   const { tvCurrent, tvQueue: remoteTvQueue } = useRoomPoll(activeRoom)
   // When in a room, mirror TV's state; fall back to local state otherwise
@@ -191,18 +192,14 @@ export default function MobileView() {
     [activeRoom, roomCodeInput, addSong, addNext, showToast, singerName]
   )
 
-  const handleSkip = useCallback(async () => {
-    if (activeRoom) {
-      try { await pushCommandToRoom(activeRoom, 'skip') } catch { }
-    } else {
-      skip()
-    }
-  }, [activeRoom, skip])
+  useEffect(() => {
+    document.title = APP_NAME
+  }, [])
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
       <header className="p-4 bg-gray-800 border-b border-gray-700">
-        <h1 className="text-xl font-bold text-purple-400 mb-3">Karaoke Queue</h1>
+        <h1 className="text-xl font-bold text-purple-400 mb-3">{APP_NAME}</h1>
 
         <div className="flex items-center gap-2 mb-1">
           <label htmlFor="singer-name" className={FIELD_LABEL_CLASS}>Singer</label>
@@ -352,25 +349,14 @@ export default function MobileView() {
         </div>
 
         {nowPlaying ? (
-          <div className="bg-purple-900/40 border border-purple-700 rounded-lg p-3 mb-3" data-testid="now-playing">
+          <div className="bg-purple-900/40 border border-purple-700 rounded-lg p-3 mb-5" data-testid="now-playing">
             <p className="font-semibold text-sm truncate">{nowPlaying.title}</p>
             <p className="text-xs text-gray-400 truncate">{nowPlaying.artist}</p>
             <SingerLine song={nowPlaying} />
           </div>
         ) : (
-          <p className="text-gray-600 text-sm mb-3" data-testid="nothing-playing">Nothing playing</p>
+          <p className="text-gray-600 text-sm mb-5" data-testid="nothing-playing">Nothing playing</p>
         )}
-
-        {/* Play/pause lives on the TV only; phones can still move to the next song */}
-        <button
-          onClick={handleSkip}
-          disabled={!activeRoom && !current && queue.length === 0}
-          className="w-full mb-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
-          aria-label="Next Song"
-          data-testid="mobile-skip-btn"
-        >
-          Next Song ⏭
-        </button>
 
         {/* Queue — mirrors TV's queue when in a room */}
         <div className="flex items-center justify-between mb-2">

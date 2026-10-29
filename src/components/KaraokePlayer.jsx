@@ -17,8 +17,10 @@ export default function KaraokePlayer({
   const playerRef = useRef(null)
   const iframeRef = useRef(null)
   const onSkipRef = useRef(onSkip)
-  // Guards against YouTube reporting "ended" more than once for the same video
-  const endedForRef = useRef(null)
+  // YouTube reports one ending twice (onStateChange + infoDelivery). Each song gets its
+  // own iframe (keyed by song id), so remembering which iframe window already ended
+  // stops a late duplicate from the previous video skipping the song after it.
+  const endedWindowRef = useRef(null)
   useEffect(() => { onSkipRef.current = onSkip }, [onSkip])
 
   const sendCommand = useCallback((func, args = []) => {
@@ -43,7 +45,6 @@ export default function KaraokePlayer({
 
   useEffect(() => {
     setPlaying(autoplay)
-    endedForRef.current = null
   }, [song?.id, autoplay])
 
   // Respond to external play/pause commands (e.g. from mobile remote)
@@ -72,10 +73,8 @@ export default function KaraokePlayer({
         const ended =
           (data.event === 'onStateChange' && data.info === 0) ||
           (data.event === 'infoDelivery' && data.info?.playerState === 0)
-        if (!ended) return
-        const currentId = iframeRef.current?.dataset.songId
-        if (endedForRef.current === currentId) return
-        endedForRef.current = currentId
+        if (!ended || endedWindowRef.current === e.source) return
+        endedWindowRef.current = e.source
         onSkipRef.current?.()
       } catch {}
     }
@@ -120,9 +119,9 @@ export default function KaraokePlayer({
     <div ref={playerRef} className="relative w-full bg-black" data-testid="karaoke-player">
       <div style={videoBoxStyle}>
         <iframe
+          key={song.id}
           ref={iframeRef}
           data-testid="youtube-iframe"
-          data-song-id={song.id}
           src={src}
           title={`${song.title} by ${song.artist}`}
           allow="autoplay; encrypted-media"

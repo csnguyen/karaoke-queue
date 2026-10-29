@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import KaraokePlayer from './KaraokePlayer'
 
@@ -145,6 +145,58 @@ describe('KaraokePlayer', () => {
     ended()
     ended()
     expect(onSkip).toHaveBeenCalledTimes(1)
+  })
+
+  describe('with browser-like iframe windows', () => {
+    // Real browsers keep one WindowProxy per <iframe> element across src changes;
+    // jsdom swaps it, which would hide stale-message bugs. Model the browser.
+    let original
+    beforeEach(() => {
+      original = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow')
+      const windows = new WeakMap()
+      Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+        configurable: true,
+        get() {
+          if (!windows.has(this)) windows.set(this, { postMessage: () => {} })
+          return windows.get(this)
+        },
+      })
+    })
+    afterEach(() => {
+      Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', original)
+    })
+
+    const songB = { id: '2', title: 'Hotel California', artist: 'Eagles', videoId: 'vidB' }
+    const ended = (source, event = 'onStateChange') => fireEvent(window, new MessageEvent('message', {
+      data: JSON.stringify(event === 'onStateChange'
+        ? { event, info: 0 }
+        : { event, info: { playerState: 0 } }),
+      source,
+    }))
+
+    it('a late duplicate "ended" from the previous video does not skip the next song', () => {
+      // YouTube sends both onStateChange:0 and infoDelivery playerState:0 for one ending.
+      // If the parent advances to the next song between them, the second must be ignored.
+      const onSkip = vi.fn()
+      const { rerender } = render(<KaraokePlayer song={mockSong} onSkip={onSkip} />)
+      const firstWindow = screen.getByTestId('youtube-iframe').contentWindow
+
+      ended(firstWindow, 'onStateChange')
+      expect(onSkip).toHaveBeenCalledTimes(1)
+
+      rerender(<KaraokePlayer song={songB} onSkip={onSkip} />)
+      ended(firstWindow, 'infoDelivery')
+      expect(onSkip).toHaveBeenCalledTimes(1)
+    })
+
+    it('still advances when the next song itself ends', () => {
+      const onSkip = vi.fn()
+      const { rerender } = render(<KaraokePlayer song={mockSong} onSkip={onSkip} />)
+      ended(screen.getByTestId('youtube-iframe').contentWindow)
+      rerender(<KaraokePlayer song={songB} onSkip={onSkip} />)
+      ended(screen.getByTestId('youtube-iframe').contentWindow)
+      expect(onSkip).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('hides the control bar when showControls is false', () => {

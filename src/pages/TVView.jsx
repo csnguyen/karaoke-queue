@@ -19,6 +19,7 @@ import { useQueue } from '../context/QueueContext'
 import { useMultiDeviceSync } from '../hooks/useMultiDeviceSync'
 import { useRoomSync } from '../hooks/useRoomSync'
 import { useResizableSidebar } from '../hooks/useResizableSidebar'
+import { APP_NAME } from '../appName'
 
 const NOW_PLAYING_BAR_HEIGHT = '112px'
 // Below this sidebar width, queue rows drop the thumbnail to keep titles readable
@@ -106,6 +107,10 @@ export default function TVView() {
     },
     [queue, reorder]
   )
+
+  useEffect(() => {
+    document.title = `${APP_NAME} - TV`
+  }, [])
 
   useEffect(() => {
     createRoom()
@@ -234,7 +239,7 @@ export default function TVView() {
       {/* Right: room code and up next */}
       <aside className="w-full lg:w-[var(--sidebar-w)] shrink-0 min-h-0 max-h-[55vh] lg:max-h-none bg-gray-900 border-t lg:border-t-0 border-gray-800 flex flex-col">
         <div className="px-5 pt-4 pb-3 border-b border-gray-800 flex items-end justify-between gap-3 shrink-0">
-          <h1 className="text-lg font-bold text-purple-400">Karaoke Queue</h1>
+          <h1 className="text-lg font-bold text-purple-400">{APP_NAME}</h1>
           {roomCode && (
             <div className="text-right" data-testid="room-code-badge">
               <p className="text-gray-500 text-[11px] uppercase tracking-widest">Room Code</p>
