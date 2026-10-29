@@ -79,6 +79,30 @@ describe('TVView', () => {
     expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Bohemian Rhapsody')
   })
 
+  describe('join QR code', () => {
+    it('shows "Scan to add songs" above a QR code for the phone page with this room', async () => {
+      renderTV({ current: null, queue: [], history: [] })
+      const qr = await screen.findByTestId('join-qr')
+      expect(qr).toHaveAttribute('data-join-url', `${window.location.origin}/?room=TEST`)
+      expect(qr.querySelector('svg')).toBeInTheDocument()
+      const helpText = screen.getByText('Scan to add songs')
+      expect(helpText.compareDocumentPosition(qr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('sits at the top of the sidebar', async () => {
+      renderTV({ current: song1, queue: [song2], history: [] })
+      const qr = await screen.findByTestId('join-qr')
+      const sidebar = screen.getByTestId('tv-queue-list').closest('aside')
+      expect(sidebar.firstElementChild).toContainElement(qr)
+    })
+
+    it('shows a placeholder until the room exists', () => {
+      renderTV({ current: null, queue: [], history: [] })
+      expect(screen.getByTestId('join-qr-pending')).toHaveTextContent('Creating room')
+      expect(screen.queryByTestId('join-qr')).not.toBeInTheDocument()
+    })
+  })
+
   it('shows the app name and sets the TV page title', () => {
     renderTV({ current: null, queue: [], history: [] })
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Noe Noraebang')

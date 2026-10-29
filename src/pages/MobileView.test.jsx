@@ -131,6 +131,53 @@ describe('MobileView', () => {
     searchState.results = []
   })
 
+  describe('joining from the TV QR code link', () => {
+    let fetchSpy
+    beforeEach(() => {
+      localStorage.clear()
+      fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ songs: [] }) })
+    })
+    afterEach(() => {
+      window.history.replaceState({}, '', '/')
+      fetchSpy.mockRestore()
+    })
+
+    it('pre-fills and joins the room from ?room=', () => {
+      window.history.replaceState({}, '', '/?room=ab12')
+      renderMobile({ current: null, queue: [], history: [] })
+      expect(screen.getByLabelText('Room')).toHaveValue('AB12')
+      expect(screen.getByTestId('join-room-btn')).toHaveTextContent('✓ AB12')
+    })
+
+    it('puts the cursor in the Singer field when no name is saved', () => {
+      window.history.replaceState({}, '', '/?room=AB12')
+      renderMobile({ current: null, queue: [], history: [] })
+      expect(screen.getByLabelText('Singer')).toHaveFocus()
+    })
+
+    it('leaves focus alone when the name is already remembered', () => {
+      localStorage.setItem('karaoke-singer-name', 'Alex')
+      window.history.replaceState({}, '', '/?room=AB12')
+      renderMobile({ current: null, queue: [], history: [] })
+      expect(screen.getByLabelText('Singer')).not.toHaveFocus()
+    })
+
+    it('starts polling the linked room', async () => {
+      window.history.replaceState({}, '', '/?room=AB12')
+      renderMobile({ current: null, queue: [], history: [] })
+      await waitFor(() =>
+        expect(fetchSpy.mock.calls.some(([url]) => url === '/api/get-room?code=AB12')).toBe(true)
+      )
+    })
+
+    it('ignores an invalid code in the link', () => {
+      window.history.replaceState({}, '', '/?room=AB')
+      renderMobile({ current: null, queue: [], history: [] })
+      expect(screen.getByLabelText('Room')).toHaveValue('')
+      expect(screen.getByTestId('join-room-btn')).toHaveTextContent('Join')
+    })
+  })
+
   describe('adding songs', () => {
     let fetchSpy
     beforeEach(() => {

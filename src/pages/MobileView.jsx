@@ -18,6 +18,7 @@ import { useQueue } from '../context/QueueContext'
 import { useYouTubeSearch } from '../hooks/useYouTubeSearch'
 import { pushSongToRoom, useRoomPoll } from '../hooks/useRoomSync'
 import { APP_NAME } from '../appName'
+import { roomCodeFromSearch } from '../roomLink'
 
 const SINGER_STORAGE_KEY = 'karaoke-singer-name'
 const SINGER_MAX_LENGTH = 30
@@ -90,8 +91,10 @@ function SortableQueueItem({ song, index, onRemove }) {
 
 export default function MobileView() {
   const [query, setQuery] = useState('')
-  const [roomCodeInput, setRoomCodeInput] = useState('')
-  const [activeRoom, setActiveRoom] = useState(null)
+  // Arriving from the TV's QR code (/?room=ABCD) joins that room straight away
+  const [roomFromLink] = useState(() => roomCodeFromSearch(window.location.search))
+  const [roomCodeInput, setRoomCodeInput] = useState(roomFromLink ?? '')
+  const [activeRoom, setActiveRoom] = useState(roomFromLink)
   const [roomError, setRoomError] = useState(null)
   const [singerName, setSingerName] = useState(loadSingerName)
   const [singerError, setSingerError] = useState(false)
@@ -195,6 +198,11 @@ export default function MobileView() {
   useEffect(() => {
     document.title = APP_NAME
   }, [])
+
+  // After scanning in, the name is the only thing left to fill in
+  useEffect(() => {
+    if (roomFromLink && !singerInputRef.current?.value.trim()) singerInputRef.current?.focus()
+  }, [roomFromLink])
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">

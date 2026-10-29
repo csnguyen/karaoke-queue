@@ -19,11 +19,16 @@ import { useQueue } from '../context/QueueContext'
 import { useMultiDeviceSync } from '../hooks/useMultiDeviceSync'
 import { useRoomSync } from '../hooks/useRoomSync'
 import { useResizableSidebar } from '../hooks/useResizableSidebar'
+import { QRCodeSVG } from 'qrcode.react'
 import { APP_NAME } from '../appName'
+import { buildJoinUrl } from '../roomLink'
 
 const NOW_PLAYING_BAR_HEIGHT = '112px'
 // Below this sidebar width, queue rows drop the thumbnail to keep titles readable
 const COMPACT_SIDEBAR_WIDTH = 340
+// QR scales with the sidebar so it stays scannable from across the room
+const QR_MIN_SIZE = 140
+const QR_MAX_SIZE = 240
 
 function thumbnailFor(song) {
   return song.thumbnail ?? `https://i.ytimg.com/vi/${song.videoId}/mqdefault.jpg`
@@ -92,6 +97,8 @@ export default function TVView() {
   const lastSeqRef = useRef(Date.now())
   const { width: sidebarWidth, dragging: resizing, handleProps } = useResizableSidebar()
   const compactQueue = sidebarWidth < COMPACT_SIDEBAR_WIDTH
+  const qrSize = Math.max(QR_MIN_SIZE, Math.min(QR_MAX_SIZE, sidebarWidth - 120))
+  const joinUrl = roomCode ? buildJoinUrl(window.location.origin, roomCode) : null
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -236,8 +243,31 @@ export default function TVView() {
         <span className={`h-10 w-0.5 rounded-full ${resizing ? 'bg-white' : 'bg-gray-600 group-hover:bg-white'}`} />
       </div>
 
-      {/* Right: room code and up next */}
+      {/* Right: join QR, room code and up next */}
       <aside className="w-full lg:w-[var(--sidebar-w)] shrink-0 min-h-0 max-h-[55vh] lg:max-h-none bg-gray-900 border-t lg:border-t-0 border-gray-800 flex flex-col">
+        <section className="px-5 pt-4 pb-3 border-b border-gray-800 flex flex-col items-center shrink-0" aria-label="Join from your phone">
+          <p className="text-base font-semibold text-white mb-2">Scan to add songs</p>
+          {joinUrl ? (
+            <div className="bg-white rounded-lg p-2" data-testid="join-qr" data-join-url={joinUrl}>
+              <QRCodeSVG
+                value={joinUrl}
+                size={qrSize}
+                level="M"
+                marginSize={1}
+                title={`Scan to join room ${roomCode}`}
+              />
+            </div>
+          ) : (
+            <div
+              className="bg-gray-800 rounded-lg flex items-center justify-center text-center text-xs text-gray-500 px-4"
+              style={{ width: qrSize + 16, height: qrSize + 16 }}
+              data-testid="join-qr-pending"
+            >
+              {syncError ? 'Room unavailable — reload to retry' : 'Creating room…'}
+            </div>
+          )}
+        </section>
+
         <div className="px-5 pt-4 pb-3 border-b border-gray-800 flex items-end justify-between gap-3 shrink-0">
           <h1 className="text-lg font-bold text-purple-400">{APP_NAME}</h1>
           {roomCode && (
