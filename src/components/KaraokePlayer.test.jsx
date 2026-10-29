@@ -75,9 +75,9 @@ describe('KaraokePlayer', () => {
     expect(btn).toHaveTextContent('Play')
   })
 
-  it('skip button has accessible aria-label', () => {
+  it('next song button has accessible aria-label', () => {
     render(<KaraokePlayer song={mockSong} onSkip={() => {}} />)
-    expect(screen.getByRole('button', { name: 'Skip' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next Song' })).toBeInTheDocument()
   })
 
   it('play-pause button has accessible aria-label reflecting state', () => {
@@ -121,5 +121,39 @@ describe('KaraokePlayer', () => {
       source: iframe.contentWindow,
     }))
     expect(onSkip).not.toHaveBeenCalled()
+  })
+
+  it('calls onSkip when infoDelivery reports playerState 0', () => {
+    const onSkip = vi.fn()
+    render(<KaraokePlayer song={mockSong} onSkip={onSkip} />)
+    const iframe = screen.getByTestId('youtube-iframe')
+    fireEvent(window, new MessageEvent('message', {
+      data: JSON.stringify({ event: 'infoDelivery', info: { playerState: 0 } }),
+      source: iframe.contentWindow,
+    }))
+    expect(onSkip).toHaveBeenCalledTimes(1)
+  })
+
+  it('only advances once when YouTube reports ended repeatedly for one video', () => {
+    const onSkip = vi.fn()
+    render(<KaraokePlayer song={mockSong} onSkip={onSkip} />)
+    const iframe = screen.getByTestId('youtube-iframe')
+    const ended = () => fireEvent(window, new MessageEvent('message', {
+      data: JSON.stringify({ event: 'onStateChange', info: 0 }),
+      source: iframe.contentWindow,
+    }))
+    ended()
+    ended()
+    expect(onSkip).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends the listening handshake to the iframe on load', () => {
+    render(<KaraokePlayer song={mockSong} onSkip={() => {}} />)
+    const iframe = screen.getByTestId('youtube-iframe')
+    const spy = vi.spyOn(iframe.contentWindow, 'postMessage')
+    fireEvent.load(iframe)
+    const sent = spy.mock.calls.map(([msg]) => JSON.parse(msg))
+    expect(sent).toContainEqual(expect.objectContaining({ event: 'listening' }))
+    expect(sent).toContainEqual(expect.objectContaining({ func: 'addEventListener', args: ['onStateChange'] }))
   })
 })

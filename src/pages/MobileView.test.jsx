@@ -1,8 +1,21 @@
 import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import MobileView from './MobileView'
+
+const searchState = vi.hoisted(() => ({ results: [] }))
+vi.mock('../hooks/useYouTubeSearch', () => ({
+  useYouTubeSearch: () => ({
+    results: searchState.results,
+    loading: false,
+    loadingMore: false,
+    error: null,
+    search: () => {},
+    loadMore: () => {},
+    hasMore: false,
+  }),
+}))
 
 const song1 = { id: '1', title: 'Bohemian Rhapsody', artist: 'Queen', videoId: 'vid1' }
 const song2 = { id: '2', title: 'Hotel California', artist: 'Eagles', videoId: 'vid2' }
@@ -73,5 +86,23 @@ describe('MobileView', () => {
     const input = screen.getByTestId('search-input')
     fireEvent.change(input, { target: { value: 'Queen' } })
     expect(input.value).toBe('Queen')
+  })
+
+  describe('toast confirmations', () => {
+    afterEach(() => { searchState.results = [] })
+
+    it('shows a toast when a song is added to the queue', () => {
+      searchState.results = [song1]
+      renderMobile({ current: null, queue: [], history: [] })
+      fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
+      expect(screen.getByTestId('toast')).toHaveTextContent(`Added to queue: ${song1.title}`)
+    })
+
+    it('shows a toast when a song is set to play next', () => {
+      searchState.results = [song1]
+      renderMobile({ current: null, queue: [], history: [] })
+      fireEvent.click(screen.getByRole('button', { name: `Play ${song1.title} next` }))
+      expect(screen.getByTestId('toast')).toHaveTextContent(`Playing next: ${song1.title}`)
+    })
   })
 })

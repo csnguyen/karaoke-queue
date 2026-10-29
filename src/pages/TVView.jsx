@@ -40,10 +40,10 @@ export default function TVView() {
   }, [current, queue, roomCode])
 
   return (
-    <div className="min-h-screen bg-black flex flex-col" data-testid="tv-view">
+    <div className="h-screen bg-black flex flex-col overflow-hidden" data-testid="tv-view">
 
       {/* Player */}
-      <div className="relative">
+      <div className="relative shrink-0">
         <KaraokePlayer song={current} onSkip={skip} externalPaused={paused} />
 
         {roomCode && (
@@ -66,7 +66,7 @@ export default function TVView() {
       </div>
 
       {/* Queue panel */}
-      <div className="flex-1 bg-gray-900 border-t border-gray-700 overflow-hidden flex flex-col">
+      <div className="flex-1 min-h-0 bg-gray-900 border-t border-gray-700 overflow-hidden flex flex-col">
         <div className="px-4 pt-3 pb-2 flex items-center justify-between shrink-0">
           <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold">
             Up Next — {queue.length} song{queue.length !== 1 ? 's' : ''}

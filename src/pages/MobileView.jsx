@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -70,6 +70,16 @@ export default function MobileView() {
   const [roomCodeInput, setRoomCodeInput] = useState('')
   const [activeRoom, setActiveRoom] = useState(null)
   const [roomError, setRoomError] = useState(null)
+  const [toast, setToast] = useState(null)
+  const toastTimerRef = useRef(null)
+
+  const showToast = useCallback((message) => {
+    clearTimeout(toastTimerRef.current)
+    setToast({ message, key: Date.now() })
+    toastTimerRef.current = setTimeout(() => setToast(null), 2500)
+  }, [])
+
+  useEffect(() => () => clearTimeout(toastTimerRef.current), [])
   const { current, queue, paused, addSong, addNext, removeSong, skip, reorder, togglePause } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
   const { tvCurrent, tvQueue: remoteTvQueue } = useRoomPoll(activeRoom)
@@ -112,11 +122,14 @@ export default function MobileView() {
     async (song, mode) => {
       if (mode === 'next') addNext(song)
       else addSong(song)
+      showToast(mode === 'next' ? `▶ Playing next: ${song.title}` : `✓ Added to queue: ${song.title}`)
       if (activeRoom) {
-        try { await pushSongToRoom(activeRoom, song) } catch { }
+        try { await pushSongToRoom(activeRoom, song) } catch {
+          showToast(`⚠ Couldn't send "${song.title}" to the TV`)
+        }
       }
     },
-    [activeRoom, addSong, addNext]
+    [activeRoom, addSong, addNext, showToast]
   )
 
   const handlePlayPause = useCallback(async () => {
@@ -332,6 +345,19 @@ export default function MobileView() {
           </DndContext>
         )}
       </section>
+
+      {toast && (
+        <div
+          key={toast.key}
+          role="status"
+          aria-live="polite"
+          className="fixed left-4 right-4 z-50 mx-auto max-w-md bg-gray-100 text-gray-900 rounded-lg shadow-lg px-4 py-3 text-sm font-medium"
+          style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+          data-testid="toast"
+        >
+          <p className="line-clamp-2">{toast.message}</p>
+        </div>
+      )}
     </div>
   )
 }
