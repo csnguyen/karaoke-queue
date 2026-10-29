@@ -20,6 +20,14 @@ import { pushSongToRoom, pushCommandToRoom, useRoomPoll } from '../hooks/useRoom
 
 const SINGER_STORAGE_KEY = 'karaoke-singer-name'
 const SINGER_MAX_LENGTH = 30
+const ROOM_CODE_RE = /^[A-Z0-9]{4}$/
+
+const FIELD_LABEL_CLASS = 'w-12 shrink-0 text-sm font-semibold text-gray-300'
+const FIELD_INPUT_CLASS =
+  'flex-1 min-w-0 px-2.5 py-2 bg-gray-700 rounded-lg text-white text-sm placeholder-gray-400 outline-none focus:ring-2'
+const INVALID_RING_CLASS = 'ring-2 ring-red-500 focus:ring-red-500'
+// Indented to line up under the inputs (label width + gap)
+const FIELD_ERROR_CLASS = 'text-red-400 text-xs mt-1 ml-14'
 
 // Remembered per device so returning singers don't retype their name
 function loadSingerName() {
@@ -87,6 +95,7 @@ export default function MobileView() {
   const [singerName, setSingerName] = useState(loadSingerName)
   const [singerError, setSingerError] = useState(false)
   const singerInputRef = useRef(null)
+  const roomInputRef = useRef(null)
   const [toast, setToast] = useState(null)
   const toastTimerRef = useRef(null)
 
@@ -131,11 +140,17 @@ export default function MobileView() {
     if (query.trim()) search(query.trim())
   }
 
+  const handleRoomCodeChange = (e) => {
+    const code = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)
+    setRoomCodeInput(code)
+    if (roomError && ROOM_CODE_RE.test(code)) setRoomError(null)
+  }
+
   const handleJoinRoom = (e) => {
     e.preventDefault()
     const code = roomCodeInput.trim().toUpperCase()
-    if (!/^[A-Z0-9]{4}$/.test(code)) {
-      setRoomError('Enter a valid 4-character room code')
+    if (!ROOM_CODE_RE.test(code)) {
+      setRoomError('Enter the 4-character room code shown on the TV')
       return
     }
     setActiveRoom(code)
@@ -145,24 +160,35 @@ export default function MobileView() {
   const pushSong = useCallback(
     async (result, mode) => {
       const name = singerName.trim()
-      if (!name) {
-        setSingerError(true)
-        singerInputRef.current?.focus()
-        singerInputRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-        showToast('Enter your name in the Singer field first')
+      // A complete code that hasn't been "Joined" yet still counts — join it now
+      let room = activeRoom
+      const typedCode = roomCodeInput.trim().toUpperCase()
+      if (!room && ROOM_CODE_RE.test(typedCode)) {
+        room = typedCode
+        setActiveRoom(typedCode)
+        setRoomError(null)
+      }
+
+      if (!name || !room) {
+        setSingerError(!name)
+        if (!room) setRoomError('Enter the 4-character room code shown on the TV')
+        const firstMissing = !name ? singerInputRef.current : roomInputRef.current
+        firstMissing?.focus()
+        firstMissing?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+        const missing = [!name && 'your Singer name', !room && 'the Room code from the TV'].filter(Boolean)
+        showToast(`Enter ${missing.join(' and ')} before adding a song`)
         return
       }
+
       const song = { ...result, singerName: name }
       if (mode === 'next') addNext(song)
       else addSong(song)
       showToast(mode === 'next' ? `▶ Playing next: ${song.title}` : `✓ Added to queue: ${song.title}`)
-      if (activeRoom) {
-        try { await pushSongToRoom(activeRoom, song, name) } catch {
-          showToast(`⚠ Couldn't send "${song.title}" to the TV`)
-        }
+      try { await pushSongToRoom(room, song, name) } catch {
+        showToast(`⚠ Couldn't send "${song.title}" to the TV — check the room code`)
       }
     },
-    [activeRoom, addSong, addNext, showToast, singerName]
+    [activeRoom, roomCodeInput, addSong, addNext, showToast, singerName]
   )
 
   const handleSkip = useCallback(async () => {
@@ -178,70 +204,79 @@ export default function MobileView() {
       <header className="p-4 bg-gray-800 border-b border-gray-700">
         <h1 className="text-xl font-bold text-purple-400 mb-3">Karaoke Queue</h1>
 
-        <div className="mb-3">
-          <label htmlFor="singer-name" className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-            Singer <span className="text-red-400" aria-hidden="true">*</span>
-          </label>
+        <div className="flex items-center gap-2 mb-1">
+          <label htmlFor="singer-name" className={FIELD_LABEL_CLASS}>Singer</label>
           <input
             id="singer-name"
             ref={singerInputRef}
             type="text"
             value={singerName}
             onChange={handleSingerChange}
-            placeholder="Your name"
+            placeholder="Your Name"
             required
             aria-required="true"
             aria-invalid={singerError}
             aria-describedby={singerError ? 'singer-error' : undefined}
             autoComplete="nickname"
             maxLength={SINGER_MAX_LENGTH}
-            className={`w-full px-3 py-2 bg-gray-700 rounded-lg text-white placeholder-gray-400 outline-none focus:ring-2 ${
-              singerError ? 'ring-2 ring-red-500 focus:ring-red-500' : 'focus:ring-purple-500'
-            }`}
+            className={`${FIELD_INPUT_CLASS} ${singerError ? INVALID_RING_CLASS : 'focus:ring-purple-500'}`}
             data-testid="singer-input"
           />
-          {singerError && (
-            <p id="singer-error" className="text-red-400 text-xs mt-1" data-testid="singer-error">
-              Your name is required so it shows on the TV when your song is up
-            </p>
-          )}
         </div>
+        {singerError && (
+          <p id="singer-error" className={FIELD_ERROR_CLASS} data-testid="singer-error">
+            Required — your name shows on the TV when it's your turn
+          </p>
+        )}
 
-        <form onSubmit={handleJoinRoom} className="flex gap-2 mb-3">
+        <form onSubmit={handleJoinRoom} className="flex items-center gap-2 mt-2 mb-1">
+          <label htmlFor="room-code" className={FIELD_LABEL_CLASS}>Room</label>
           <input
+            id="room-code"
+            ref={roomInputRef}
             type="text"
             value={roomCodeInput}
-            onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase().slice(0, 4))}
-            placeholder="Room code (e.g. KARA)"
+            onChange={handleRoomCodeChange}
+            placeholder="Room Code (4 letter code on TV)"
+            required
+            aria-required="true"
+            aria-invalid={!!roomError}
+            aria-describedby={roomError ? 'room-error' : undefined}
+            autoCapitalize="characters"
+            autoComplete="off"
             maxLength={4}
-            className="flex-1 px-3 py-2 bg-gray-700 rounded-lg text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-purple-500 font-mono tracking-widest uppercase"
+            className={`${FIELD_INPUT_CLASS} font-mono tracking-widest uppercase placeholder:font-sans placeholder:tracking-normal placeholder:normal-case placeholder:text-xs ${
+              roomError ? INVALID_RING_CLASS : 'focus:ring-purple-500'
+            }`}
             data-testid="room-code-input"
           />
           <button
             type="submit"
-            className="px-4 py-2 bg-purple-800 hover:bg-purple-700 rounded-lg font-medium text-sm transition-colors whitespace-nowrap"
+            className="px-2.5 py-2 bg-purple-800 hover:bg-purple-700 rounded-lg font-medium text-sm transition-colors whitespace-nowrap shrink-0"
             data-testid="join-room-btn"
           >
             {activeRoom ? `✓ ${activeRoom}` : 'Join'}
           </button>
         </form>
         {roomError && (
-          <p className="text-red-400 text-xs mb-2" data-testid="room-error">{roomError}</p>
+          <p id="room-error" className={FIELD_ERROR_CLASS} data-testid="room-error">{roomError}</p>
         )}
 
-        <form onSubmit={handleSearch} className="flex gap-2">
+        <form onSubmit={handleSearch} className="flex items-center gap-2 mt-2">
+          <label htmlFor="song-search" className={FIELD_LABEL_CLASS}>Song</label>
           <input
+            id="song-search"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search for a song..."
-            className="flex-1 px-3 py-2 bg-gray-700 rounded-lg text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-purple-500"
+            placeholder="Search song or artist name"
+            className={`${FIELD_INPUT_CLASS} focus:ring-purple-500`}
             data-testid="search-input"
           />
           <button
             type="submit"
             disabled={loading}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg font-medium transition-colors"
+            className="px-2.5 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg font-medium text-sm transition-colors shrink-0"
             data-testid="search-btn"
           >
             {loading ? '…' : 'Search'}
@@ -280,18 +315,18 @@ export default function MobileView() {
                 {/* Bottom row: action buttons */}
                 <div className="flex gap-2 px-3 pb-3">
                   <button
-                    onClick={() => pushSong(song, 'next')}
-                    className="flex-1 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-xs rounded-full font-medium transition-colors"
-                    aria-label={`Play ${song.title} next`}
-                  >
-                    ▶ Play Next
-                  </button>
-                  <button
                     onClick={() => pushSong(song, 'queue')}
                     className="flex-1 py-1.5 bg-purple-600 hover:bg-purple-700 text-xs rounded-full font-medium transition-colors"
                     aria-label={`Add ${song.title} to queue`}
                   >
                     + Add to Queue
+                  </button>
+                  <button
+                    onClick={() => pushSong(song, 'next')}
+                    className="flex-1 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-xs rounded-full font-medium transition-colors"
+                    aria-label={`Play ${song.title} next`}
+                  >
+                    ▶ Play Next
                   </button>
                 </div>
               </li>

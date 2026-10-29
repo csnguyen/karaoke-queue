@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import MobileView from './MobileView'
 
@@ -99,66 +99,136 @@ describe('MobileView', () => {
     expect(screen.getByTestId('now-playing')).toHaveTextContent('🎤 Alex')
   })
 
-  describe('singer name', () => {
-    beforeEach(() => { localStorage.clear() })
-    afterEach(() => { searchState.results = [] })
-
-    const typeName = (name) =>
-      fireEvent.change(screen.getByTestId('singer-input'), { target: { value: name } })
-
-    it('renders a required Singer field with a "Your name" placeholder', () => {
+  describe('top fields', () => {
+    it('labels each field on the left with helper text inside', () => {
       renderMobile({ current: null, queue: [], history: [] })
-      const input = screen.getByLabelText(/Singer/)
-      expect(input).toBeRequired()
-      expect(input).toHaveAttribute('placeholder', 'Your name')
+      expect(screen.getByLabelText('Singer')).toHaveAttribute('placeholder', 'Your Name')
+      expect(screen.getByLabelText('Room')).toHaveAttribute('placeholder', 'Room Code (4 letter code on TV)')
+      expect(screen.getByLabelText('Song')).toHaveAttribute('placeholder', 'Search song or artist name')
     })
 
-    it('blocks adding a song until a name is entered', () => {
+    it('marks Singer and Room as required', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      expect(screen.getByLabelText('Singer')).toBeRequired()
+      expect(screen.getByLabelText('Room')).toBeRequired()
+    })
+
+    it('uppercases the room code and strips other characters', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'ab-c1z' } })
+      expect(screen.getByLabelText('Room')).toHaveValue('ABC1')
+    })
+  })
+
+  it('shows Add to Queue on the left and Play Next on the right', () => {
+    searchState.results = [song1]
+    renderMobile({ current: null, queue: [], history: [] })
+    const [first, second] = within(screen.getByTestId('search-results')).getAllByRole('button')
+    expect(first).toHaveTextContent('Add to Queue')
+    expect(second).toHaveTextContent('Play Next')
+    searchState.results = []
+  })
+
+  describe('adding songs', () => {
+    let fetchSpy
+    beforeEach(() => {
+      localStorage.clear()
+      fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ songs: [] }),
+      })
+    })
+    afterEach(() => {
+      searchState.results = []
+      fetchSpy.mockRestore()
+    })
+
+    const typeName = (name) => fireEvent.change(screen.getByLabelText('Singer'), { target: { value: name } })
+    const typeRoom = (code) => fireEvent.change(screen.getByLabelText('Room'), { target: { value: code } })
+    const addToQueue = () => fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
+    const playNext = () => fireEvent.click(screen.getByRole('button', { name: `Play ${song1.title} next` }))
+    const pushSongCalls = () => fetchSpy.mock.calls.filter(([url]) => url === '/api/push-song')
+
+    function setup() {
       searchState.results = [song1]
       renderMobile({ current: null, queue: [], history: [] })
-      fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
-      expect(screen.getByTestId('singer-error')).toBeInTheDocument()
-      expect(screen.getByTestId('singer-input')).toHaveAttribute('aria-invalid', 'true')
+    }
+
+    it('blocks and asks for both when name and room code are missing', () => {
+      setup()
+      addToQueue()
+      expect(screen.getByTestId('toast')).toHaveTextContent(
+        'Enter your Singer name and the Room code from the TV before adding a song'
+      )
+      expect(screen.getByLabelText('Singer')).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByLabelText('Room')).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByLabelText('Singer')).toHaveFocus()
+      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
+      expect(pushSongCalls()).toHaveLength(0)
+    })
+
+    it('blocks Play Next when only the room code is missing', () => {
+      setup()
+      typeName('Alex')
+      playNext()
+      expect(screen.getByTestId('toast')).toHaveTextContent(
+        'Enter the Room code from the TV before adding a song'
+      )
+      expect(screen.getByLabelText('Room')).toHaveFocus()
+      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
+    })
+
+    it('blocks when only the singer name is missing', () => {
+      setup()
+      typeRoom('ABCD')
+      addToQueue()
+      expect(screen.getByTestId('toast')).toHaveTextContent(
+        'Enter your Singer name before adding a song'
+      )
       expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
     })
 
     it('treats a whitespace-only name as missing', () => {
-      searchState.results = [song1]
-      renderMobile({ current: null, queue: [], history: [] })
+      setup()
       typeName('   ')
-      fireEvent.click(screen.getByRole('button', { name: `Play ${song1.title} next` }))
-      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
+      typeRoom('ABCD')
+      addToQueue()
+      expect(screen.getByTestId('toast')).toHaveTextContent('Enter your Singer name')
     })
 
-    it('attaches the singer name to queued songs', () => {
-      searchState.results = [song1]
-      renderMobile({ current: null, queue: [], history: [] })
+    it('treats an incomplete room code as missing', () => {
+      setup()
+      typeName('Alex')
+      typeRoom('AB')
+      addToQueue()
+      expect(screen.getByTestId('toast')).toHaveTextContent('Enter the Room code from the TV')
+    })
+
+    it('adds the song with the singer once both are entered (auto-joins a typed code)', async () => {
+      setup()
       typeName('  Alex  ')
-      fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
+      typeRoom('abcd')
+      addToQueue()
+      expect(screen.getByTestId('toast')).toHaveTextContent(`Added to queue: ${song1.title}`)
+      expect(screen.getByTestId('join-room-btn')).toHaveTextContent('✓ ABCD')
       expect(screen.getByTestId('queue-list')).toHaveTextContent('🎤 Alex')
-      expect(screen.queryByTestId('singer-error')).not.toBeInTheDocument()
+      await waitFor(() => expect(pushSongCalls()).toHaveLength(1))
+      const body = JSON.parse(pushSongCalls()[0][1].body)
+      expect(body).toMatchObject({ roomCode: 'ABCD', singerName: 'Alex' })
     })
 
-    it('remembers the name on this device', () => {
-      renderMobile({ current: null, queue: [], history: [] })
+    it('shows a Play Next toast when both are entered', () => {
+      setup()
+      typeName('Alex')
+      typeRoom('ABCD')
+      playNext()
+      expect(screen.getByTestId('toast')).toHaveTextContent(`Playing next: ${song1.title}`)
+    })
+
+    it('remembers the singer name on this device', () => {
+      setup()
       typeName('Alex')
       expect(localStorage.getItem('karaoke-singer-name')).toBe('Alex')
-    })
-
-    it('shows a toast when a song is added to the queue', () => {
-      searchState.results = [song1]
-      renderMobile({ current: null, queue: [], history: [] })
-      typeName('Alex')
-      fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
-      expect(screen.getByTestId('toast')).toHaveTextContent(`Added to queue: ${song1.title}`)
-    })
-
-    it('shows a toast when a song is set to play next', () => {
-      searchState.results = [song1]
-      renderMobile({ current: null, queue: [], history: [] })
-      typeName('Alex')
-      fireEvent.click(screen.getByRole('button', { name: `Play ${song1.title} next` }))
-      expect(screen.getByTestId('toast')).toHaveTextContent(`Playing next: ${song1.title}`)
     })
   })
 })
