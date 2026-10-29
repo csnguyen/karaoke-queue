@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import TVView from './TVView'
 
@@ -120,6 +120,74 @@ describe('TVView', () => {
     fireEvent.click(screen.getByTestId('tv-next-btn'))
     expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Hotel California')
     expect(screen.getByText(/Up Next — 1 song$/i)).toBeInTheDocument()
+  })
+
+  describe('resizable sidebar', () => {
+    // jsdom viewport is 1024px wide → max sidebar = 1024 - 560 = 464
+    beforeEach(() => { localStorage.clear() })
+    const handle = () => screen.getByRole('separator', { name: 'Resize sidebar' })
+    const widthOf = () => Number(handle().getAttribute('aria-valuenow'))
+    // jsdom has no PointerEvent; a MouseEvent carries clientX under the pointer event name
+    const pointer = (type, clientX) =>
+      act(() => { window.dispatchEvent(new MouseEvent(type, { clientX })) })
+
+    it('starts at the default width and exposes it via the CSS variable', () => {
+      renderTV({ current: song1, queue: [], history: [] })
+      expect(widthOf()).toBe(440)
+      expect(screen.getByTestId('tv-view').style.getPropertyValue('--sidebar-w')).toBe('440px')
+    })
+
+    it('dragging the handle resizes the sidebar and saves the width', () => {
+      renderTV({ current: song1, queue: [], history: [] })
+      fireEvent.pointerDown(handle(), { button: 0, clientX: 584 })
+      expect(screen.getByTestId('resize-overlay')).toBeInTheDocument()
+      pointer('pointermove', 700)
+      expect(widthOf()).toBe(324)
+      pointer('pointerup', 700)
+      expect(screen.queryByTestId('resize-overlay')).not.toBeInTheDocument()
+      expect(localStorage.getItem('karaoke-tv-sidebar-width')).toBe('324')
+    })
+
+    it('clamps to the minimum and maximum widths', () => {
+      renderTV({ current: song1, queue: [], history: [] })
+      fireEvent.pointerDown(handle(), { button: 0, clientX: 584 })
+      pointer('pointermove', 1020)
+      expect(widthOf()).toBe(260)
+      pointer('pointermove', 0)
+      expect(widthOf()).toBe(464)
+      pointer('pointerup', 0)
+    })
+
+    it('arrow keys resize (left widens, right narrows)', () => {
+      renderTV({ current: song1, queue: [], history: [] })
+      fireEvent.keyDown(handle(), { key: 'ArrowRight' })
+      expect(widthOf()).toBe(424)
+      fireEvent.keyDown(handle(), { key: 'ArrowLeft', shiftKey: true })
+      expect(widthOf()).toBe(464)
+      fireEvent.keyDown(handle(), { key: 'Home' })
+      expect(widthOf()).toBe(260)
+    })
+
+    it('double-click resets to the default width', () => {
+      renderTV({ current: song1, queue: [], history: [] })
+      fireEvent.keyDown(handle(), { key: 'Home' })
+      fireEvent.doubleClick(handle())
+      expect(widthOf()).toBe(440)
+    })
+
+    it('restores the saved width on load', () => {
+      localStorage.setItem('karaoke-tv-sidebar-width', '300')
+      renderTV({ current: song1, queue: [], history: [] })
+      expect(widthOf()).toBe(300)
+    })
+
+    it('switches queue rows to a compact layout when narrow', () => {
+      renderTV({ current: song1, queue: [song2], history: [] })
+      expect(screen.getByTestId('tv-queue-thumb')).toBeInTheDocument()
+      fireEvent.keyDown(handle(), { key: 'Home' })
+      expect(screen.queryByTestId('tv-queue-thumb')).not.toBeInTheDocument()
+      expect(screen.getByTestId('tv-play-btn-0')).toHaveTextContent('▶')
+    })
   })
 
   it('each queue item has a drag handle for reordering', () => {

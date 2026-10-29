@@ -18,14 +18,17 @@ import KaraokePlayer from '../components/KaraokePlayer'
 import { useQueue } from '../context/QueueContext'
 import { useMultiDeviceSync } from '../hooks/useMultiDeviceSync'
 import { useRoomSync } from '../hooks/useRoomSync'
+import { useResizableSidebar } from '../hooks/useResizableSidebar'
 
 const NOW_PLAYING_BAR_HEIGHT = '112px'
+// Below this sidebar width, queue rows drop the thumbnail to keep titles readable
+const COMPACT_SIDEBAR_WIDTH = 340
 
 function thumbnailFor(song) {
   return song.thumbnail ?? `https://i.ytimg.com/vi/${song.videoId}/mqdefault.jpg`
 }
 
-function SortableTVQueueItem({ song, index, onPlayNow }) {
+function SortableTVQueueItem({ song, index, onPlayNow, compact }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: song.id })
 
@@ -51,12 +54,15 @@ function SortableTVQueueItem({ song, index, onPlayNow }) {
       >
         ⠿
       </button>
-      <img
-        src={thumbnailFor(song)}
-        alt=""
-        className="w-20 aspect-video object-cover rounded shrink-0 bg-gray-700"
-        loading="lazy"
-      />
+      {!compact && (
+        <img
+          src={thumbnailFor(song)}
+          alt=""
+          className="w-20 aspect-video object-cover rounded shrink-0 bg-gray-700"
+          loading="lazy"
+          data-testid="tv-queue-thumb"
+        />
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-white font-medium text-sm leading-snug line-clamp-2">{song.title}</p>
         {song.singerName ? (
@@ -71,7 +77,7 @@ function SortableTVQueueItem({ song, index, onPlayNow }) {
         aria-label={`Play ${song.title} now`}
         data-testid={`tv-play-btn-${index}`}
       >
-        ▶ Play
+        {compact ? '▶' : '▶ Play'}
       </button>
     </li>
   )
@@ -83,6 +89,8 @@ export default function TVView() {
   const { roomCode, syncError, createRoom, lastCommand } = useRoomSync()
   // Only process commands pushed after this TV session started
   const lastSeqRef = useRef(Date.now())
+  const { width: sidebarWidth, dragging: resizing, handleProps } = useResizableSidebar()
+  const compactQueue = sidebarWidth < COMPACT_SIDEBAR_WIDTH
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -131,9 +139,13 @@ export default function TVView() {
 
   return (
     <div
-      className="h-screen bg-black text-white flex flex-col lg:flex-row overflow-hidden"
+      className={`h-screen bg-black text-white flex flex-col lg:flex-row overflow-hidden ${resizing ? 'select-none cursor-col-resize' : ''}`}
+      style={{ '--sidebar-w': `${sidebarWidth}px` }}
       data-testid="tv-view"
     >
+      {/* While dragging, cover the page so the YouTube iframe can't swallow pointer events */}
+      {resizing && <div className="fixed inset-0 z-50 cursor-col-resize" data-testid="resize-overlay" />}
+
       {/* Left: player, as large as the column allows, with Now Playing underneath */}
       <main className="flex-1 min-w-0 min-h-0 flex flex-col bg-black">
         <div className="flex-1 min-h-0 flex items-center justify-center">
@@ -207,8 +219,20 @@ export default function TVView() {
         </section>
       </main>
 
+      {/* Drag handle between player and sidebar (side-by-side layout only) */}
+      <div
+        {...handleProps}
+        className={`hidden lg:flex group relative w-2 shrink-0 cursor-col-resize items-center justify-center bg-gray-900 outline-none focus-visible:bg-purple-600 touch-none ${
+          resizing ? 'bg-purple-600' : 'hover:bg-purple-700'
+        }`}
+        title="Drag to resize · double-click to reset"
+        data-testid="sidebar-resize-handle"
+      >
+        <span className={`h-10 w-0.5 rounded-full ${resizing ? 'bg-white' : 'bg-gray-600 group-hover:bg-white'}`} />
+      </div>
+
       {/* Right: room code and up next */}
-      <aside className="w-full lg:w-[400px] xl:w-[440px] shrink-0 min-h-0 max-h-[55vh] lg:max-h-none bg-gray-900 border-t lg:border-t-0 lg:border-l border-gray-800 flex flex-col">
+      <aside className="w-full lg:w-[var(--sidebar-w)] shrink-0 min-h-0 max-h-[55vh] lg:max-h-none bg-gray-900 border-t lg:border-t-0 border-gray-800 flex flex-col">
         <div className="px-5 pt-4 pb-3 border-b border-gray-800 flex items-end justify-between gap-3 shrink-0">
           <h1 className="text-lg font-bold text-purple-400">Karaoke Queue</h1>
           {roomCode && (
@@ -225,7 +249,9 @@ export default function TVView() {
           <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">
             Up Next — {queue.length} song{queue.length !== 1 ? 's' : ''}
           </p>
-          {queue.length > 1 && <span className="text-xs text-gray-600">drag ⠿ to reorder</span>}
+          {queue.length > 1 && !compactQueue && (
+            <span className="text-xs text-gray-600">drag ⠿ to reorder</span>
+          )}
         </div>
 
         {queue.length === 0 ? (
@@ -237,7 +263,7 @@ export default function TVView() {
             <SortableContext items={queue.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <ul className="flex-1 min-h-0 overflow-y-auto px-5 pb-5 space-y-2" data-testid="tv-queue-list">
                 {queue.map((song, i) => (
-                  <SortableTVQueueItem key={song.id} song={song} index={i} onPlayNow={skipTo} />
+                  <SortableTVQueueItem key={song.id} song={song} index={i} onPlayNow={skipTo} compact={compactQueue} />
                 ))}
               </ul>
             </SortableContext>
