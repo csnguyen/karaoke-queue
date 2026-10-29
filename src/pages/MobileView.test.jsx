@@ -71,6 +71,30 @@ describe('MobileView', () => {
     expect(screen.getByText('Hotel California')).toBeInTheDocument()
   })
 
+  describe('clear search button', () => {
+    const searchInput = () => screen.getByLabelText('Song')
+
+    it('is hidden while the search field is empty', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument()
+    })
+
+    it('appears once there is text, and clears it and refocuses the field', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      fireEvent.change(searchInput(), { target: { value: 'hotel california' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+      expect(searchInput()).toHaveValue('')
+      expect(searchInput()).toHaveFocus()
+      expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument()
+    })
+
+    it('does not submit a search', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      fireEvent.change(searchInput(), { target: { value: 'queen' } })
+      expect(screen.getByRole('button', { name: 'Clear search' })).toHaveAttribute('type', 'button')
+    })
+  })
+
   it('has no Next Song control (TV only)', () => {
     renderMobile({ current: song1, queue: [song2], history: [] })
     expect(screen.queryByTestId('mobile-skip-btn')).not.toBeInTheDocument()

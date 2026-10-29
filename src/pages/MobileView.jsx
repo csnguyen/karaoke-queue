@@ -139,6 +139,13 @@ export default function MobileView() {
     [queue, reorder]
   )
 
+  const searchInputRef = useRef(null)
+  // Empty the field and keep the cursor there, ready to type the next search
+  const clearSearch = () => {
+    setQuery('')
+    searchInputRef.current?.focus()
+  }
+
   const handleSearch = (e) => {
     e.preventDefault()
     if (query.trim()) search(query.trim())
@@ -268,15 +275,29 @@ export default function MobileView() {
 
         <form onSubmit={handleSearch} className="flex items-center gap-2 mt-2">
           <label htmlFor="song-search" className={FIELD_LABEL_CLASS}>Song</label>
-          <input
-            id="song-search"
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search song or artist name"
-            className={`${FIELD_INPUT_CLASS} focus:ring-purple-500`}
-            data-testid="search-input"
-          />
+          <div className="relative flex-1 min-w-0">
+            <input
+              id="song-search"
+              ref={searchInputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search song or artist name"
+              className={`${FIELD_INPUT_CLASS} w-full focus:ring-purple-500 ${query ? 'pr-9' : ''}`}
+              data-testid="search-input"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                className="absolute right-0.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-white active:bg-gray-600 text-xl leading-none"
+                aria-label="Clear search"
+                data-testid="clear-search-btn"
+              >
+                ×
+              </button>
+            )}
+          </div>
           <button
             type="submit"
             disabled={loading}
