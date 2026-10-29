@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     videoId: songData.videoId ?? songData.id,
     title: songData.title,
     artist: songData.artist ?? '',
-    singerName: singerName ?? '',
+    singerName: String(singerName ?? '').trim().slice(0, 30),
   }
   // rpush is atomic — safe under concurrent requests
   await kv.rpush(`room:${roomCode}:songs`, JSON.stringify(song))

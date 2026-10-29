@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import MobileView from './MobileView'
@@ -88,12 +88,67 @@ describe('MobileView', () => {
     expect(input.value).toBe('Queen')
   })
 
-  describe('toast confirmations', () => {
+  it('has no play/pause control (TV only)', () => {
+    renderMobile({ current: song1, queue: [], history: [] })
+    expect(screen.queryByTestId('mobile-play-pause-btn')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^(play|pause)$/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the singer on the Now Playing card', () => {
+    renderMobile({ current: { ...song1, singerName: 'Alex' }, queue: [], history: [] })
+    expect(screen.getByTestId('now-playing')).toHaveTextContent('🎤 Alex')
+  })
+
+  describe('singer name', () => {
+    beforeEach(() => { localStorage.clear() })
     afterEach(() => { searchState.results = [] })
+
+    const typeName = (name) =>
+      fireEvent.change(screen.getByTestId('singer-input'), { target: { value: name } })
+
+    it('renders a required Singer field with a "Your name" placeholder', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      const input = screen.getByLabelText(/Singer/)
+      expect(input).toBeRequired()
+      expect(input).toHaveAttribute('placeholder', 'Your name')
+    })
+
+    it('blocks adding a song until a name is entered', () => {
+      searchState.results = [song1]
+      renderMobile({ current: null, queue: [], history: [] })
+      fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
+      expect(screen.getByTestId('singer-error')).toBeInTheDocument()
+      expect(screen.getByTestId('singer-input')).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
+    })
+
+    it('treats a whitespace-only name as missing', () => {
+      searchState.results = [song1]
+      renderMobile({ current: null, queue: [], history: [] })
+      typeName('   ')
+      fireEvent.click(screen.getByRole('button', { name: `Play ${song1.title} next` }))
+      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
+    })
+
+    it('attaches the singer name to queued songs', () => {
+      searchState.results = [song1]
+      renderMobile({ current: null, queue: [], history: [] })
+      typeName('  Alex  ')
+      fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
+      expect(screen.getByTestId('queue-list')).toHaveTextContent('🎤 Alex')
+      expect(screen.queryByTestId('singer-error')).not.toBeInTheDocument()
+    })
+
+    it('remembers the name on this device', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      typeName('Alex')
+      expect(localStorage.getItem('karaoke-singer-name')).toBe('Alex')
+    })
 
     it('shows a toast when a song is added to the queue', () => {
       searchState.results = [song1]
       renderMobile({ current: null, queue: [], history: [] })
+      typeName('Alex')
       fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
       expect(screen.getByTestId('toast')).toHaveTextContent(`Added to queue: ${song1.title}`)
     })
@@ -101,6 +156,7 @@ describe('MobileView', () => {
     it('shows a toast when a song is set to play next', () => {
       searchState.results = [song1]
       renderMobile({ current: null, queue: [], history: [] })
+      typeName('Alex')
       fireEvent.click(screen.getByRole('button', { name: `Play ${song1.title} next` }))
       expect(screen.getByTestId('toast')).toHaveTextContent(`Playing next: ${song1.title}`)
     })

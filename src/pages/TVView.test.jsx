@@ -79,7 +79,29 @@ describe('TVView', () => {
     expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Bohemian Rhapsody')
   })
 
-  it('hides the player built-in control bar in favour of the sidebar controls', () => {
+  it('shows the singer name in Now Playing', () => {
+    renderTV({ current: { ...song1, singerName: 'Alex' }, queue: [], history: [] })
+    expect(screen.getByTestId('tv-now-singer')).toHaveTextContent('Alex')
+  })
+
+  it('omits the singer block for songs without a singer', () => {
+    renderTV({ current: song1, queue: [], history: [] })
+    expect(screen.queryByTestId('tv-now-singer')).not.toBeInTheDocument()
+  })
+
+  it('shows each queued song’s singer in the sidebar', () => {
+    renderTV({ current: song1, queue: [{ ...song2, singerName: 'Sam' }], history: [] })
+    expect(screen.getByTestId('tv-queue-list')).toHaveTextContent('🎤 Sam')
+  })
+
+  it('keeps Now Playing out of the sidebar', () => {
+    renderTV({ current: song1, queue: [song2], history: [] })
+    const sidebar = screen.getByTestId('tv-queue-list').closest('aside')
+    expect(sidebar).not.toContainElement(screen.getByTestId('tv-now-playing'))
+    expect(sidebar).not.toContainElement(screen.getByTestId('tv-play-pause-btn'))
+  })
+
+  it('hides the player built-in control bar in favour of the TV controls', () => {
     renderTV({ current: song1, queue: [], history: [] })
     expect(screen.queryByTestId('play-pause-btn')).not.toBeInTheDocument()
     expect(screen.getByTestId('tv-play-pause-btn')).toBeInTheDocument()

@@ -18,10 +18,23 @@ import { useQueue } from '../context/QueueContext'
 import { useYouTubeSearch } from '../hooks/useYouTubeSearch'
 import { pushSongToRoom, pushCommandToRoom, useRoomPoll } from '../hooks/useRoomSync'
 
+const SINGER_STORAGE_KEY = 'karaoke-singer-name'
+const SINGER_MAX_LENGTH = 30
+
+// Remembered per device so returning singers don't retype their name
+function loadSingerName() {
+  try { return localStorage.getItem(SINGER_STORAGE_KEY) ?? '' } catch { return '' }
+}
+
 function formatCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
   return String(n)
+}
+
+function SingerLine({ song }) {
+  if (!song.singerName) return null
+  return <p className="text-xs text-purple-300 truncate">🎤 {song.singerName}</p>
 }
 
 function SortableQueueItem({ song, index, onRemove }) {
@@ -53,6 +66,7 @@ function SortableQueueItem({ song, index, onRemove }) {
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm truncate">{song.title}</p>
         <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+        <SingerLine song={song} />
       </div>
       <button
         onClick={() => onRemove(song.id)}
@@ -70,8 +84,18 @@ export default function MobileView() {
   const [roomCodeInput, setRoomCodeInput] = useState('')
   const [activeRoom, setActiveRoom] = useState(null)
   const [roomError, setRoomError] = useState(null)
+  const [singerName, setSingerName] = useState(loadSingerName)
+  const [singerError, setSingerError] = useState(false)
+  const singerInputRef = useRef(null)
   const [toast, setToast] = useState(null)
   const toastTimerRef = useRef(null)
+
+  const handleSingerChange = (e) => {
+    const name = e.target.value.slice(0, SINGER_MAX_LENGTH)
+    setSingerName(name)
+    if (name.trim()) setSingerError(false)
+    try { localStorage.setItem(SINGER_STORAGE_KEY, name) } catch {}
+  }
 
   const showToast = useCallback((message) => {
     clearTimeout(toastTimerRef.current)
@@ -80,7 +104,7 @@ export default function MobileView() {
   }, [])
 
   useEffect(() => () => clearTimeout(toastTimerRef.current), [])
-  const { current, queue, paused, addSong, addNext, removeSong, skip, reorder, togglePause } = useQueue()
+  const { current, queue, addSong, addNext, removeSong, skip, reorder } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
   const { tvCurrent, tvQueue: remoteTvQueue } = useRoomPoll(activeRoom)
   // When in a room, mirror TV's state; fall back to local state otherwise
@@ -119,26 +143,27 @@ export default function MobileView() {
   }
 
   const pushSong = useCallback(
-    async (song, mode) => {
+    async (result, mode) => {
+      const name = singerName.trim()
+      if (!name) {
+        setSingerError(true)
+        singerInputRef.current?.focus()
+        singerInputRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+        showToast('Enter your name in the Singer field first')
+        return
+      }
+      const song = { ...result, singerName: name }
       if (mode === 'next') addNext(song)
       else addSong(song)
       showToast(mode === 'next' ? `▶ Playing next: ${song.title}` : `✓ Added to queue: ${song.title}`)
       if (activeRoom) {
-        try { await pushSongToRoom(activeRoom, song) } catch {
+        try { await pushSongToRoom(activeRoom, song, name) } catch {
           showToast(`⚠ Couldn't send "${song.title}" to the TV`)
         }
       }
     },
-    [activeRoom, addSong, addNext, showToast]
+    [activeRoom, addSong, addNext, showToast, singerName]
   )
-
-  const handlePlayPause = useCallback(async () => {
-    if (activeRoom) {
-      const cmd = paused ? 'resume' : 'pause'
-      try { await pushCommandToRoom(activeRoom, cmd) } catch { }
-    }
-    togglePause()
-  }, [activeRoom, paused, togglePause])
 
   const handleSkip = useCallback(async () => {
     if (activeRoom) {
@@ -152,6 +177,35 @@ export default function MobileView() {
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
       <header className="p-4 bg-gray-800 border-b border-gray-700">
         <h1 className="text-xl font-bold text-purple-400 mb-3">Karaoke Queue</h1>
+
+        <div className="mb-3">
+          <label htmlFor="singer-name" className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            Singer <span className="text-red-400" aria-hidden="true">*</span>
+          </label>
+          <input
+            id="singer-name"
+            ref={singerInputRef}
+            type="text"
+            value={singerName}
+            onChange={handleSingerChange}
+            placeholder="Your name"
+            required
+            aria-required="true"
+            aria-invalid={singerError}
+            aria-describedby={singerError ? 'singer-error' : undefined}
+            autoComplete="nickname"
+            maxLength={SINGER_MAX_LENGTH}
+            className={`w-full px-3 py-2 bg-gray-700 rounded-lg text-white placeholder-gray-400 outline-none focus:ring-2 ${
+              singerError ? 'ring-2 ring-red-500 focus:ring-red-500' : 'focus:ring-purple-500'
+            }`}
+            data-testid="singer-input"
+          />
+          {singerError && (
+            <p id="singer-error" className="text-red-400 text-xs mt-1" data-testid="singer-error">
+              Your name is required so it shows on the TV when your song is up
+            </p>
+          )}
+        </div>
 
         <form onSubmit={handleJoinRoom} className="flex gap-2 mb-3">
           <input
@@ -266,43 +320,22 @@ export default function MobileView() {
           <div className="bg-purple-900/40 border border-purple-700 rounded-lg p-3 mb-3" data-testid="now-playing">
             <p className="font-semibold text-sm truncate">{nowPlaying.title}</p>
             <p className="text-xs text-gray-400 truncate">{nowPlaying.artist}</p>
+            <SingerLine song={nowPlaying} />
           </div>
         ) : (
           <p className="text-gray-600 text-sm mb-3" data-testid="nothing-playing">Nothing playing</p>
         )}
 
-        {/* Playback controls — when in a room these act as a TV remote */}
-        <div className="flex items-center justify-center gap-4 mb-4" data-testid="playback-controls">
-          <button
-            onClick={handlePlayPause}
-            disabled={!activeRoom && !current}
-            className="flex items-center justify-center w-14 h-14 rounded-full bg-purple-600 hover:bg-purple-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-2xl"
-            aria-label={paused ? 'Play' : 'Pause'}
-            data-testid="mobile-play-pause-btn"
-          >
-            {paused ? '▶' : '⏸'}
-          </button>
-          <button
-            onClick={handleSkip}
-            disabled={!activeRoom && !current && queue.length === 0}
-            className="flex items-center justify-center w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xl"
-            aria-label="Next"
-            data-testid="mobile-skip-btn"
-          >
-            ⏭
-          </button>
-        </div>
-
-        {/* Start Playing button when queue has songs but nothing playing (local only) */}
-        {!current && !activeRoom && queue.length > 0 && (
-          <button
-            onClick={skip}
-            className="w-full mb-4 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold text-sm transition-colors"
-            data-testid="start-playing-btn"
-          >
-            ▶ Start Playing
-          </button>
-        )}
+        {/* Play/pause lives on the TV only; phones can still move to the next song */}
+        <button
+          onClick={handleSkip}
+          disabled={!activeRoom && !current && queue.length === 0}
+          className="w-full mb-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
+          aria-label="Next Song"
+          data-testid="mobile-skip-btn"
+        >
+          Next Song ⏭
+        </button>
 
         {/* Queue — mirrors TV's queue when in a room */}
         <div className="flex items-center justify-between mb-2">
@@ -324,6 +357,7 @@ export default function MobileView() {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm truncate">{song.title}</p>
                   <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+                  <SingerLine song={song} />
                 </div>
               </li>
             ))}
