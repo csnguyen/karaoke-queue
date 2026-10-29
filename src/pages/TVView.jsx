@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -26,9 +26,29 @@ import { buildJoinUrl } from '../roomLink'
 const NOW_PLAYING_BAR_HEIGHT = '112px'
 // Below this sidebar width, queue rows drop the thumbnail to keep titles readable
 const COMPACT_SIDEBAR_WIDTH = 340
-// QR scales with the sidebar so it stays scannable from across the room
+// QR scales with the sidebar so it stays scannable from across the room,
+// drawn at 75% of that range to leave more room for the queue
 const QR_MIN_SIZE = 140
 const QR_MAX_SIZE = 240
+const QR_SCALE = 0.75
+
+// Browsers only allow autoplay with sound after someone has clicked or pressed a key
+function useHasInteracted() {
+  const [hasInteracted, setHasInteracted] = useState(
+    () => navigator.userActivation?.hasBeenActive ?? false
+  )
+  useEffect(() => {
+    if (hasInteracted) return
+    const onInteract = () => setHasInteracted(true)
+    window.addEventListener('pointerdown', onInteract)
+    window.addEventListener('keydown', onInteract)
+    return () => {
+      window.removeEventListener('pointerdown', onInteract)
+      window.removeEventListener('keydown', onInteract)
+    }
+  }, [hasInteracted])
+  return hasInteracted
+}
 
 function thumbnailFor(song) {
   return song.thumbnail ?? `https://i.ytimg.com/vi/${song.videoId}/mqdefault.jpg`
@@ -95,9 +115,30 @@ export default function TVView() {
   const { roomCode, syncError, createRoom, lastCommand } = useRoomSync()
   // Only process commands pushed after this TV session started
   const lastSeqRef = useRef(Date.now())
-  const { width: sidebarWidth, dragging: resizing, handleProps } = useResizableSidebar()
+  // Narrowest sidebar that keeps the app name and room code on one line; used as the
+  // default and minimum width. Measured from the rendered header, since fonts vary by device.
+  const headerRef = useRef(null)
+  const [headerFitWidth, setHeaderFitWidth] = useState(null)
+  useLayoutEffect(() => {
+    const header = headerRef.current
+    if (!header) return
+    const style = getComputedStyle(header)
+    const px = (value) => parseFloat(value) || 0 // 'normal' and '' count as 0
+    const content = [...header.children].reduce((sum, el) => sum + el.getBoundingClientRect().width, 0)
+    const fit = Math.ceil(
+      content +
+      px(style.columnGap) * (header.children.length - 1) +
+      px(style.paddingLeft) + px(style.paddingRight)
+    ) + 2
+    if (content > 0) setHeaderFitWidth(fit)
+  }, [roomCode])
+
+  const { width: sidebarWidth, dragging: resizing, handleProps } = useResizableSidebar(
+    headerFitWidth ? { defaultWidth: headerFitWidth, minWidth: headerFitWidth } : undefined
+  )
   const compactQueue = sidebarWidth < COMPACT_SIDEBAR_WIDTH
-  const qrSize = Math.max(QR_MIN_SIZE, Math.min(QR_MAX_SIZE, sidebarWidth - 120))
+  const qrSize = Math.round(QR_SCALE * Math.max(QR_MIN_SIZE, Math.min(QR_MAX_SIZE, sidebarWidth - 120)))
+  const hasInteracted = useHasInteracted()
   const joinUrl = roomCode ? buildJoinUrl(window.location.origin, roomCode) : null
 
   const sensors = useSensors(
@@ -180,6 +221,11 @@ export default function TVView() {
                 and enter room code{' '}
                 <span className="text-purple-300 font-mono font-bold tracking-widest">{roomCode ?? '…'}</span>
               </p>
+              {!hasInteracted && (
+                <p className="mt-6 text-sm text-gray-400" data-testid="interact-hint">
+                  Tip: click anywhere on this screen once so songs can start with sound
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -243,9 +289,24 @@ export default function TVView() {
         <span className={`h-10 w-0.5 rounded-full ${resizing ? 'bg-white' : 'bg-gray-600 group-hover:bg-white'}`} />
       </div>
 
-      {/* Right: join QR, room code and up next */}
+      {/* Right: app name + room code, join QR, up next */}
       <aside className="w-full lg:w-[var(--sidebar-w)] shrink-0 min-h-0 max-h-[55vh] lg:max-h-none bg-gray-900 border-t lg:border-t-0 border-gray-800 flex flex-col">
-        <section className="px-5 pt-4 pb-3 border-b border-gray-800 flex flex-col items-center shrink-0" aria-label="Join from your phone">
+        <div
+          ref={headerRef}
+          className="px-5 pt-4 pb-3 flex items-end justify-between gap-3 shrink-0"
+          data-testid="sidebar-header"
+        >
+          <h1 className="text-lg font-bold text-purple-400 whitespace-nowrap">{APP_NAME}</h1>
+          {/* Always rendered (hidden until the room exists) so the width can be measured up front */}
+          <div className={`text-right whitespace-nowrap ${roomCode ? '' : 'invisible'}`} data-testid="room-code-badge">
+            <p className="text-gray-500 text-[11px] uppercase tracking-widest">Room Code</p>
+            <p className="text-purple-300 font-mono text-2xl font-bold tracking-widest leading-none" data-testid="room-code">
+              {roomCode ?? 'XXXX'}
+            </p>
+          </div>
+        </div>
+
+        <section className="px-5 pb-4 border-b border-gray-800 flex flex-col items-center shrink-0" aria-label="Join from your phone">
           <p className="text-base font-semibold text-white mb-2">Scan to add songs</p>
           {joinUrl ? (
             <div className="bg-white rounded-lg p-2" data-testid="join-qr" data-join-url={joinUrl}>
@@ -267,18 +328,6 @@ export default function TVView() {
             </div>
           )}
         </section>
-
-        <div className="px-5 pt-4 pb-3 border-b border-gray-800 flex items-end justify-between gap-3 shrink-0">
-          <h1 className="text-lg font-bold text-purple-400">{APP_NAME}</h1>
-          {roomCode && (
-            <div className="text-right" data-testid="room-code-badge">
-              <p className="text-gray-500 text-[11px] uppercase tracking-widest">Room Code</p>
-              <p className="text-purple-300 font-mono text-2xl font-bold tracking-widest leading-none" data-testid="room-code">
-                {roomCode}
-              </p>
-            </div>
-          )}
-        </div>
 
         <div className="px-5 pt-4 pb-2 flex items-center justify-between shrink-0">
           <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">

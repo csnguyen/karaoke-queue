@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
-import KaraokePlayer from './KaraokePlayer'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import KaraokePlayer, { AUTOPLAY_CHECK_MS } from './KaraokePlayer'
 
 const mockSong = {
   id: '1',
@@ -196,6 +196,54 @@ describe('KaraokePlayer', () => {
       rerender(<KaraokePlayer song={songB} onSkip={onSkip} />)
       ended(screen.getByTestId('youtube-iframe').contentWindow)
       expect(onSkip).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('when the browser blocks autoplay with sound', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    function loadPlayer(props = {}) {
+      const utils = render(<KaraokePlayer song={mockSong} onSkip={() => {}} {...props} />)
+      const iframe = screen.getByTestId('youtube-iframe')
+      const spy = vi.spyOn(iframe.contentWindow, 'postMessage')
+      fireEvent.load(iframe)
+      const commands = () => spy.mock.calls.map(([msg]) => JSON.parse(msg).func).filter(Boolean)
+      const state = (info) => fireEvent(window, new MessageEvent('message', {
+        data: JSON.stringify({ event: 'onStateChange', info }),
+        source: iframe.contentWindow,
+      }))
+      return { ...utils, commands, state }
+    }
+
+    it('starts the video muted and offers a sound button if it has not started', () => {
+      const { commands } = loadPlayer()
+      act(() => { vi.advanceTimersByTime(AUTOPLAY_CHECK_MS) })
+      expect(commands()).toEqual(expect.arrayContaining(['mute', 'playVideo']))
+      expect(screen.getByTestId('enable-sound-btn')).toHaveTextContent('Click to turn on sound')
+    })
+
+    it('clicking the sound button unmutes and keeps playing', () => {
+      const { commands } = loadPlayer()
+      act(() => { vi.advanceTimersByTime(AUTOPLAY_CHECK_MS) })
+      fireEvent.click(screen.getByTestId('enable-sound-btn'))
+      expect(commands().slice(-2)).toEqual(['unMute', 'playVideo'])
+      expect(screen.queryByTestId('enable-sound-btn')).not.toBeInTheDocument()
+    })
+
+    it('does nothing when the video started playing on its own', () => {
+      const { commands, state } = loadPlayer()
+      state(1)
+      act(() => { vi.advanceTimersByTime(AUTOPLAY_CHECK_MS) })
+      expect(commands()).not.toContain('mute')
+      expect(screen.queryByTestId('enable-sound-btn')).not.toBeInTheDocument()
+    })
+
+    it('does nothing when the TV is paused on purpose', () => {
+      const { commands } = loadPlayer({ externalPaused: true, onTogglePause: () => {} })
+      act(() => { vi.advanceTimersByTime(AUTOPLAY_CHECK_MS) })
+      expect(commands()).not.toContain('mute')
+      expect(screen.queryByTestId('enable-sound-btn')).not.toBeInTheDocument()
     })
   })
 

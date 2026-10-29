@@ -79,6 +79,31 @@ describe('TVView', () => {
     expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Bohemian Rhapsody')
   })
 
+  describe('when nothing is playing', () => {
+    it('starts the first song a phone adds to the room straight away', async () => {
+      globalThis.fetch.mockImplementation(async (url) => ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          String(url).startsWith('/api/get-room')
+            ? { songs: [{ ...song1, singerName: 'Alex' }] }
+            : { code: 'TEST', songs: [] },
+      }))
+      renderTV({ current: null, queue: [], history: [] })
+      expect(screen.getByTestId('player-empty')).toBeInTheDocument()
+      expect(await screen.findByTestId('tv-now-playing')).toHaveTextContent('Bohemian Rhapsody')
+      expect(screen.getByTestId('karaoke-player')).toBeInTheDocument()
+      expect(screen.getByText(/Up Next — 0 songs/i)).toBeInTheDocument()
+    })
+
+    it('shows a one-time tip to click the screen so songs can play with sound', () => {
+      renderTV({ current: null, queue: [], history: [] })
+      expect(screen.getByTestId('interact-hint')).toBeInTheDocument()
+      fireEvent.pointerDown(document.body)
+      expect(screen.queryByTestId('interact-hint')).not.toBeInTheDocument()
+    })
+  })
+
   describe('join QR code', () => {
     it('shows "Scan to add songs" above a QR code for the phone page with this room', async () => {
       renderTV({ current: null, queue: [], history: [] })
@@ -89,11 +114,21 @@ describe('TVView', () => {
       expect(helpText.compareDocumentPosition(qr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
-    it('sits at the top of the sidebar', async () => {
+    it('sits below the app name and room code', async () => {
       renderTV({ current: song1, queue: [song2], history: [] })
       const qr = await screen.findByTestId('join-qr')
+      const header = screen.getByTestId('sidebar-header')
       const sidebar = screen.getByTestId('tv-queue-list').closest('aside')
-      expect(sidebar.firstElementChild).toContainElement(qr)
+      expect(sidebar.firstElementChild).toBe(header)
+      expect(header.compareDocumentPosition(qr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(qr.compareDocumentPosition(screen.getByTestId('tv-queue-list')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('is drawn at 75% of the previous size', async () => {
+      // jsdom fallback width 260 → previous size max(140, 260 - 120) = 140 → 75% = 105
+      renderTV({ current: null, queue: [], history: [] })
+      const svg = (await screen.findByTestId('join-qr')).querySelector('svg')
+      expect(svg).toHaveAttribute('width', '105')
     })
 
     it('shows a placeholder until the room exists', () => {
@@ -153,70 +188,105 @@ describe('TVView', () => {
   })
 
   describe('resizable sidebar', () => {
-    // jsdom viewport is 1024px wide → max sidebar = 1024 - 560 = 464
-    beforeEach(() => { localStorage.clear() })
+    // jsdom viewport is 1024px wide → max sidebar = 1024 - 560 = 464.
+    // jsdom has no layout, so header widths are stubbed: app name 130 + room code 100,
+    // no padding/gap from Tailwind in jsdom, +2px rounding margin → fits at 232.
+    const HEADER_FIT = 232
+    const STORAGE_KEY = 'karaoke-tv-sidebar-width-v2'
+    let rectSpy
+    beforeEach(() => {
+      localStorage.clear()
+      const original = Element.prototype.getBoundingClientRect
+      rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function () {
+        if (this.parentElement?.dataset.testid === 'sidebar-header') {
+          const width = this.tagName === 'H1' ? 130 : 100
+          return { width, height: 30, top: 0, left: 0, right: width, bottom: 30, x: 0, y: 0 }
+        }
+        return original.call(this)
+      })
+    })
+    afterEach(() => rectSpy.mockRestore())
+
     const handle = () => screen.getByRole('separator', { name: 'Resize sidebar' })
     const widthOf = () => Number(handle().getAttribute('aria-valuenow'))
     // jsdom has no PointerEvent; a MouseEvent carries clientX under the pointer event name
     const pointer = (type, clientX) =>
       act(() => { window.dispatchEvent(new MouseEvent(type, { clientX })) })
 
-    it('starts at the default width and exposes it via the CSS variable', () => {
+    it('defaults to the narrowest width that fits the app name and room code on one line', () => {
       renderTV({ current: song1, queue: [], history: [] })
-      expect(widthOf()).toBe(440)
-      expect(screen.getByTestId('tv-view').style.getPropertyValue('--sidebar-w')).toBe('440px')
+      expect(widthOf()).toBe(HEADER_FIT)
+      expect(screen.getByTestId('tv-view').style.getPropertyValue('--sidebar-w')).toBe(`${HEADER_FIT}px`)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveClass('whitespace-nowrap')
+    })
+
+    it('falls back to 260px when the header cannot be measured', () => {
+      rectSpy.mockRestore()
+      renderTV({ current: song1, queue: [], history: [] })
+      expect(widthOf()).toBe(260)
+    })
+
+    it('ignores widths saved before the new default', () => {
+      localStorage.setItem('karaoke-tv-sidebar-width', '440')
+      renderTV({ current: song1, queue: [], history: [] })
+      expect(widthOf()).toBe(HEADER_FIT)
     })
 
     it('dragging the handle resizes the sidebar and saves the width', () => {
       renderTV({ current: song1, queue: [], history: [] })
-      fireEvent.pointerDown(handle(), { button: 0, clientX: 584 })
+      fireEvent.pointerDown(handle(), { button: 0, clientX: 790 })
       expect(screen.getByTestId('resize-overlay')).toBeInTheDocument()
       pointer('pointermove', 700)
       expect(widthOf()).toBe(324)
       pointer('pointerup', 700)
       expect(screen.queryByTestId('resize-overlay')).not.toBeInTheDocument()
-      expect(localStorage.getItem('karaoke-tv-sidebar-width')).toBe('324')
+      expect(localStorage.getItem(STORAGE_KEY)).toBe('324')
     })
 
-    it('clamps to the minimum and maximum widths', () => {
+    it('cannot be dragged narrower than the header fit, or past the maximum', () => {
       renderTV({ current: song1, queue: [], history: [] })
-      fireEvent.pointerDown(handle(), { button: 0, clientX: 584 })
+      fireEvent.pointerDown(handle(), { button: 0, clientX: 790 })
       pointer('pointermove', 1020)
-      expect(widthOf()).toBe(260)
+      expect(widthOf()).toBe(HEADER_FIT)
       pointer('pointermove', 0)
       expect(widthOf()).toBe(464)
       pointer('pointerup', 0)
     })
 
-    it('arrow keys resize (left widens, right narrows)', () => {
+    it('arrow keys resize (left widens, right narrows); Home/End jump to the limits', () => {
       renderTV({ current: song1, queue: [], history: [] })
-      fireEvent.keyDown(handle(), { key: 'ArrowRight' })
-      expect(widthOf()).toBe(424)
+      fireEvent.keyDown(handle(), { key: 'ArrowLeft' })
+      expect(widthOf()).toBe(HEADER_FIT + 16)
       fireEvent.keyDown(handle(), { key: 'ArrowLeft', shiftKey: true })
+      expect(widthOf()).toBe(HEADER_FIT + 80)
+      fireEvent.keyDown(handle(), { key: 'ArrowRight' })
+      expect(widthOf()).toBe(HEADER_FIT + 64)
+      fireEvent.keyDown(handle(), { key: 'End' })
       expect(widthOf()).toBe(464)
       fireEvent.keyDown(handle(), { key: 'Home' })
-      expect(widthOf()).toBe(260)
+      expect(widthOf()).toBe(HEADER_FIT)
     })
 
-    it('double-click resets to the default width', () => {
+    it('double-click resets to the default width and forgets the saved one', () => {
       renderTV({ current: song1, queue: [], history: [] })
-      fireEvent.keyDown(handle(), { key: 'Home' })
+      fireEvent.keyDown(handle(), { key: 'End' })
       fireEvent.doubleClick(handle())
-      expect(widthOf()).toBe(440)
+      expect(widthOf()).toBe(HEADER_FIT)
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
     })
 
     it('restores the saved width on load', () => {
-      localStorage.setItem('karaoke-tv-sidebar-width', '300')
+      localStorage.setItem(STORAGE_KEY, '300')
       renderTV({ current: song1, queue: [], history: [] })
       expect(widthOf()).toBe(300)
     })
 
-    it('switches queue rows to a compact layout when narrow', () => {
+    it('uses the compact queue layout when narrow and thumbnails when wide', () => {
       renderTV({ current: song1, queue: [song2], history: [] })
-      expect(screen.getByTestId('tv-queue-thumb')).toBeInTheDocument()
-      fireEvent.keyDown(handle(), { key: 'Home' })
       expect(screen.queryByTestId('tv-queue-thumb')).not.toBeInTheDocument()
       expect(screen.getByTestId('tv-play-btn-0')).toHaveTextContent('▶')
+      fireEvent.keyDown(handle(), { key: 'End' })
+      expect(screen.getByTestId('tv-queue-thumb')).toBeInTheDocument()
     })
   })
 

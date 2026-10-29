@@ -2,6 +2,10 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 
 // Default leaves room below the video for the controls bar and an "Up Next" row.
 const DEFAULT_MAX_VIDEO_HEIGHT = 'calc(100vh - 260px)'
+// How long to wait for autoplay before assuming the browser blocked it
+export const AUTOPLAY_CHECK_MS = 4000
+// YouTube player states: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
+const STARTED_STATES = new Set([0, 1, 3])
 
 // When onTogglePause is passed, play/pause is controlled by the parent via externalPaused.
 export default function KaraokePlayer({
@@ -22,6 +26,16 @@ export default function KaraokePlayer({
   // stops a late duplicate from the previous video skipping the song after it.
   const endedWindowRef = useRef(null)
   useEffect(() => { onSkipRef.current = onSkip }, [onSkip])
+
+  // Browsers block autoplay with sound until someone interacts with the page. When that
+  // happens we start the video muted and offer a button; the click also lets later
+  // songs autoplay with sound, so it's needed once per TV session at most.
+  const [soundBlocked, setSoundBlocked] = useState(false)
+  const playerStateRef = useRef(null)
+  const autoplayTimerRef = useRef(null)
+  const externalPausedRef = useRef(externalPaused)
+  useEffect(() => { externalPausedRef.current = externalPaused }, [externalPaused])
+  useEffect(() => () => clearTimeout(autoplayTimerRef.current), [])
 
   const sendCommand = useCallback((func, args = []) => {
     iframeRef.current?.contentWindow?.postMessage(
@@ -62,7 +76,23 @@ export default function KaraokePlayer({
     if (!win) return
     win.postMessage(JSON.stringify({ event: 'listening', id: 'karaoke-player', channel: 'widget' }), '*')
     win.postMessage(JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }), '*')
-  }, [])
+
+    playerStateRef.current = null
+    clearTimeout(autoplayTimerRef.current)
+    if (!autoplay) return
+    autoplayTimerRef.current = setTimeout(() => {
+      if (externalPausedRef.current || STARTED_STATES.has(playerStateRef.current)) return
+      sendCommand('mute')
+      sendCommand('playVideo')
+      setSoundBlocked(true)
+    }, AUTOPLAY_CHECK_MS)
+  }, [autoplay, sendCommand])
+
+  const enableSound = useCallback(() => {
+    sendCommand('unMute')
+    sendCommand('playVideo')
+    setSoundBlocked(false)
+  }, [sendCommand])
 
   // Auto-advance when YouTube signals the video has ended (playerState === 0)
   useEffect(() => {
@@ -70,10 +100,12 @@ export default function KaraokePlayer({
       if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return
       try {
         const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data
-        const ended =
-          (data.event === 'onStateChange' && data.info === 0) ||
-          (data.event === 'infoDelivery' && data.info?.playerState === 0)
-        if (!ended || endedWindowRef.current === e.source) return
+        const state =
+          data.event === 'onStateChange' ? data.info
+          : data.event === 'infoDelivery' ? data.info?.playerState
+          : undefined
+        if (typeof state === 'number') playerStateRef.current = state
+        if (state !== 0 || endedWindowRef.current === e.source) return
         endedWindowRef.current = e.source
         onSkipRef.current?.()
       } catch {}
@@ -117,7 +149,16 @@ export default function KaraokePlayer({
 
   return (
     <div ref={playerRef} className="relative w-full bg-black" data-testid="karaoke-player">
-      <div style={videoBoxStyle}>
+      <div className="relative" style={videoBoxStyle}>
+        {soundBlocked && (
+          <button
+            onClick={enableSound}
+            className="absolute left-1/2 bottom-[12%] -translate-x-1/2 z-10 px-6 py-3 rounded-full bg-purple-600 hover:bg-purple-500 text-white text-lg font-semibold shadow-xl whitespace-nowrap"
+            data-testid="enable-sound-btn"
+          >
+            🔇 Click to turn on sound
+          </button>
+        )}
         <iframe
           key={song.id}
           ref={iframeRef}
