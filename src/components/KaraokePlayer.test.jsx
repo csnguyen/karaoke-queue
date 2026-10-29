@@ -147,6 +147,22 @@ describe('KaraokePlayer', () => {
     expect(onSkip).toHaveBeenCalledTimes(1)
   })
 
+  it('hides the control bar when showControls is false', () => {
+    render(<KaraokePlayer song={mockSong} onSkip={() => {}} showControls={false} />)
+    expect(screen.getByTestId('youtube-iframe')).toBeInTheDocument()
+    expect(screen.queryByTestId('play-pause-btn')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('skip-btn')).not.toBeInTheDocument()
+  })
+
+  it('spacebar calls onTogglePause instead of local state when controlled', () => {
+    const onTogglePause = vi.fn()
+    render(
+      <KaraokePlayer song={mockSong} onSkip={() => {}} externalPaused={false} onTogglePause={onTogglePause} />
+    )
+    fireEvent.keyDown(document.body, { code: 'Space' })
+    expect(onTogglePause).toHaveBeenCalledTimes(1)
+  })
+
   it('sends the listening handshake to the iframe on load', () => {
     render(<KaraokePlayer song={mockSong} onSkip={() => {}} />)
     const iframe = screen.getByTestId('youtube-iframe')

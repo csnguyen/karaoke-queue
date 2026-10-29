@@ -73,4 +73,36 @@ describe('TVView', () => {
     renderTV({ current: song1, queue: [song2, song3], history: [] })
     expect(screen.getByText(/Up Next — 2 songs/i)).toBeInTheDocument()
   })
+
+  it('shows the current song in the sidebar Now Playing panel', () => {
+    renderTV({ current: song1, queue: [], history: [] })
+    expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Bohemian Rhapsody')
+  })
+
+  it('hides the player built-in control bar in favour of the sidebar controls', () => {
+    renderTV({ current: song1, queue: [], history: [] })
+    expect(screen.queryByTestId('play-pause-btn')).not.toBeInTheDocument()
+    expect(screen.getByTestId('tv-play-pause-btn')).toBeInTheDocument()
+  })
+
+  it('sidebar play/pause button toggles its label', () => {
+    renderTV({ current: song1, queue: [], history: [], paused: false })
+    const btn = screen.getByTestId('tv-play-pause-btn')
+    expect(btn).toHaveAccessibleName('Pause')
+    fireEvent.click(btn)
+    expect(btn).toHaveAccessibleName('Play')
+  })
+
+  it('Next Song button advances to the next queued song', () => {
+    renderTV({ current: song1, queue: [song2, song3], history: [] })
+    fireEvent.click(screen.getByTestId('tv-next-btn'))
+    expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Hotel California')
+    expect(screen.getByText(/Up Next — 1 song$/i)).toBeInTheDocument()
+  })
+
+  it('each queue item has a drag handle for reordering', () => {
+    renderTV({ current: song1, queue: [song2, song3], history: [] })
+    expect(screen.getByRole('button', { name: 'Drag to reorder Hotel California' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Drag to reorder Yesterday' })).toBeInTheDocument()
+  })
 })

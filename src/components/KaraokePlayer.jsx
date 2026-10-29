@@ -1,10 +1,18 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 
-// Space reserved below the video for the controls bar and the first "Up Next" row,
-// so the TV never needs scrolling to see what's playing and what's next.
-const RESERVED_BELOW_VIDEO = '260px'
+// Default leaves room below the video for the controls bar and an "Up Next" row.
+const DEFAULT_MAX_VIDEO_HEIGHT = 'calc(100vh - 260px)'
 
-export default function KaraokePlayer({ song, onSkip, autoplay = true, externalPaused }) {
+// When onTogglePause is passed, play/pause is controlled by the parent via externalPaused.
+export default function KaraokePlayer({
+  song,
+  onSkip,
+  autoplay = true,
+  externalPaused,
+  onTogglePause,
+  showControls = true,
+  maxVideoHeight = DEFAULT_MAX_VIDEO_HEIGHT,
+}) {
   const [playing, setPlaying] = useState(autoplay)
   const playerRef = useRef(null)
   const iframeRef = useRef(null)
@@ -21,13 +29,17 @@ export default function KaraokePlayer({ song, onSkip, autoplay = true, externalP
   }, [])
 
   const togglePlay = useCallback(() => {
+    if (onTogglePause) {
+      onTogglePause()
+      return
+    }
     if (playing) {
       sendCommand('pauseVideo')
     } else {
       sendCommand('playVideo')
     }
     setPlaying((p) => !p)
-  }, [playing, sendCommand])
+  }, [playing, sendCommand, onTogglePause])
 
   useEffect(() => {
     setPlaying(autoplay)
@@ -84,7 +96,7 @@ export default function KaraokePlayer({ song, onSkip, autoplay = true, externalP
 
   const videoBoxStyle = {
     aspectRatio: '16/9',
-    width: `min(100%, calc((100vh - ${RESERVED_BELOW_VIDEO}) * 16 / 9))`,
+    width: `min(100%, calc(${maxVideoHeight} * 16 / 9))`,
     margin: '0 auto',
   }
 
@@ -120,7 +132,7 @@ export default function KaraokePlayer({ song, onSkip, autoplay = true, externalP
         />
       </div>
 
-      <div className="flex items-center gap-4 px-4 py-3 bg-gray-900">
+      {showControls && <div className="flex items-center gap-4 px-4 py-3 bg-gray-900">
         <div className="flex-1 min-w-0">
           <p className="text-xs text-purple-400 uppercase tracking-widest font-semibold">Now Playing</p>
           <p className="text-white font-semibold text-lg truncate">{song.title}</p>
@@ -144,7 +156,7 @@ export default function KaraokePlayer({ song, onSkip, autoplay = true, externalP
         >
           Next Song ⏭
         </button>
-      </div>
+      </div>}
     </div>
   )
 }
