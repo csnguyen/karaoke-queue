@@ -117,9 +117,9 @@ export default function MobileView() {
   }, [])
 
   useEffect(() => () => clearTimeout(toastTimerRef.current), [])
-  const { current, queue, addSong, addNext, removeSong, reorder } = useQueue()
+  const { current, queue, removeSong, reorder } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
-  const { tvCurrent, tvQueue: remoteTvQueue } = useRoomPoll(activeRoom)
+  const { tvCurrent, tvQueue: remoteTvQueue } = useRoomPoll(activeRoom, { mergeSongs: false })
   // When in a room, mirror TV's state; fall back to local state otherwise
   const nowPlaying = activeRoom ? (tvCurrent ?? null) : current
   const displayQueue = activeRoom && remoteTvQueue !== undefined ? remoteTvQueue : queue
@@ -184,15 +184,14 @@ export default function MobileView() {
         return
       }
 
+      // The TV owns the queue; the room assigns each request its own id
       const song = { ...result, singerName: name }
-      if (mode === 'next') addNext(song)
-      else addSong(song)
       showToast(mode === 'next' ? `▶ Playing next: ${song.title}` : `✓ Added to queue: ${song.title}`)
-      try { await pushSongToRoom(room, song, name) } catch {
+      try { await pushSongToRoom(room, song, name, { playNext: mode === 'next' }) } catch {
         showToast(`⚠ Couldn't send "${song.title}" to the TV — check the room code`)
       }
     },
-    [activeRoom, roomCodeInput, addSong, addNext, showToast, singerName]
+    [activeRoom, roomCodeInput, showToast, singerName]
   )
 
   useEffect(() => {

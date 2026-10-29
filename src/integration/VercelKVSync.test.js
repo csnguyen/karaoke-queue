@@ -2,7 +2,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useRoomSync, pushSongToRoom, POLL_INTERVAL_MS } from '../hooks/useRoomSync'
-import { QueueProvider } from '../context/QueueContext'
+import { QueueProvider, useQueue } from '../context/QueueContext'
 
 const wrapper = ({ children }) => React.createElement(QueueProvider, null, children)
 
@@ -92,12 +92,23 @@ describe('push-song payload matches LocalStorage schema', () => {
       roomCode: 'ABCD',
       songData: song,
       singerName: 'Alice',
+      playNext: false,
     })
     // Payload fields must match LocalStorage song schema
     expect(capturedBody.songData).toHaveProperty('id')
     expect(capturedBody.songData).toHaveProperty('videoId')
     expect(capturedBody.songData).toHaveProperty('title')
     expect(capturedBody.songData).toHaveProperty('artist')
+  })
+
+  it('marks Play Next requests', async () => {
+    let capturedBody
+    mockFetch((url, opts) => {
+      capturedBody = JSON.parse(opts?.body ?? '{}')
+      return makeOkJson({ ok: true })
+    })
+    await pushSongToRoom('ABCD', makeSong(), 'Alice', { playNext: true })
+    expect(capturedBody.playNext).toBe(true)
   })
 
   it('throws when push-song returns 400 for invalid roomCode', async () => {
@@ -169,25 +180,76 @@ describe('polling — interval and error recovery', () => {
   })
 })
 
-// ─── MERGE_REMOTE_SONGS deduplication ─────────────────────────────────────────
+// ─── TV taking song requests from the room ────────────────────────────────────
 
-describe('MERGE_REMOTE_SONGS — deduplication against LocalStorage schema', () => {
-  it('merges only new songs not already in the queue', async () => {
-    const existingSong = makeSong({ id: 'existing', title: 'Old Song' })
-    const newSong = makeSong({ id: 'new', title: 'New Song' })
+describe('TV queue from room requests', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
 
+  // Each request in the room list has its own id; videoId can repeat.
+  const request = (id, videoId, extra = {}) =>
+    makeSong({ id, videoId, title: `Song ${videoId}`, ...extra })
+
+  // Serves the room's request list; tests append to it between polls.
+  async function setupTV(initialState = { current: null, queue: [], history: [] }) {
+    const roomRequests = []
     mockFetch((url) => {
-      if (url === '/api/create-room') return makeOkJson({ code: 'MERG' })
-      return makeOkJson({ songs: [existingSong, newSong] })
+      if (url === '/api/create-room') return makeOkJson({ code: 'ROOM' })
+      return makeOkJson({ songs: [...roomRequests] })
     })
-
-    const initialState = { current: null, queue: [existingSong], history: [] }
-    const wrapperWithState = ({ children }) =>
+    const stateWrapper = ({ children }) =>
       React.createElement(QueueProvider, { initialStateOverride: initialState }, children)
+    const { result } = renderHook(() => ({ room: useRoomSync(), queue: useQueue() }), { wrapper: stateWrapper })
+    await act(async () => { await result.current.room.createRoom() })
+    const poll = async () => { await act(async () => { vi.advanceTimersByTime(POLL_INTERVAL_MS) }) }
+    return { result, roomRequests, poll }
+  }
 
-    const { result } = renderHook(() => useRoomSync(), { wrapper: wrapperWithState })
-    await act(async () => { await result.current.createRoom() })
-    // Poll succeeds — no error means deduplication ran without crash
-    await waitFor(() => expect(result.current.syncError).toBeNull())
+  it('accepts a song that this TV played in an earlier session', async () => {
+    const playedLastNight = request('old-request', 'vidX')
+    const { result, roomRequests, poll } = await setupTV({ current: null, queue: [], history: [playedLastNight] })
+    roomRequests.push(request('new-request', 'vidX'))
+    await poll()
+    expect(result.current.queue.queue.map((s) => s.id)).toEqual(['new-request'])
+  })
+
+  it('queues the same song twice when two people request it', async () => {
+    const { result, roomRequests, poll } = await setupTV()
+    roomRequests.push(request('r1', 'vidX', { singerName: 'Alex' }), request('r2', 'vidX', { singerName: 'Sam' }))
+    await poll()
+    expect(result.current.queue.queue.map((s) => s.singerName)).toEqual(['Alex', 'Sam'])
+  })
+
+  it('never re-adds a request after it has been played', async () => {
+    const { result, roomRequests, poll } = await setupTV()
+    roomRequests.push(request('r1', 'vidA'), request('r2', 'vidB'))
+    await poll()
+    act(() => { result.current.queue.skip() }) // r1 playing
+    act(() => { result.current.queue.skip() }) // r1 → history, r2 playing
+    await poll()
+    await poll()
+    expect(result.current.queue.current.id).toBe('r2')
+    expect(result.current.queue.queue).toEqual([])
+  })
+
+  it('takes each request once even though the room list repeats on every poll', async () => {
+    const { result, roomRequests, poll } = await setupTV()
+    roomRequests.push(request('r1', 'vidA'))
+    await poll()
+    roomRequests.push(request('r2', 'vidB'))
+    await poll()
+    await poll()
+    expect(result.current.queue.queue.map((s) => s.id)).toEqual(['r1', 'r2'])
+  })
+
+  it('puts Play Next requests at the front of the queue', async () => {
+    const { result, roomRequests, poll } = await setupTV()
+    roomRequests.push(request('r1', 'vidA'), request('r2', 'vidB'))
+    await poll()
+    roomRequests.push(request('r3', 'vidC', { playNext: true }))
+    await poll()
+    const queue = result.current.queue.queue
+    expect(queue.map((s) => s.id)).toEqual(['r3', 'r1', 'r2'])
+    expect(queue[0]).not.toHaveProperty('playNext')
   })
 })

@@ -253,25 +253,49 @@ describe('MobileView', () => {
       expect(screen.getByTestId('toast')).toHaveTextContent('Enter the Room code from the TV')
     })
 
-    it('adds the song with the singer once both are entered (auto-joins a typed code)', async () => {
+    it('sends the song with the singer once both are entered (auto-joins a typed code)', async () => {
       setup()
       typeName('  Alex  ')
       typeRoom('abcd')
       addToQueue()
       expect(screen.getByTestId('toast')).toHaveTextContent(`Added to queue: ${song1.title}`)
       expect(screen.getByTestId('join-room-btn')).toHaveTextContent('✓ ABCD')
-      expect(screen.getByTestId('queue-list')).toHaveTextContent('🎤 Alex')
       await waitFor(() => expect(pushSongCalls()).toHaveLength(1))
       const body = JSON.parse(pushSongCalls()[0][1].body)
-      expect(body).toMatchObject({ roomCode: 'ABCD', singerName: 'Alex' })
+      expect(body).toMatchObject({ roomCode: 'ABCD', singerName: 'Alex', playNext: false })
     })
 
-    it('shows a Play Next toast when both are entered', () => {
+    it('sends Play Next requests flagged so the TV puts them first', async () => {
       setup()
       typeName('Alex')
       typeRoom('ABCD')
       playNext()
       expect(screen.getByTestId('toast')).toHaveTextContent(`Playing next: ${song1.title}`)
+      await waitFor(() => expect(pushSongCalls()).toHaveLength(1))
+      expect(JSON.parse(pushSongCalls()[0][1].body).playNext).toBe(true)
+    })
+
+    it('lets the same singer request the same song twice', async () => {
+      setup()
+      typeName('Alex')
+      typeRoom('ABCD')
+      addToQueue()
+      addToQueue()
+      await waitFor(() => expect(pushSongCalls()).toHaveLength(2))
+    })
+
+    it('shows the queue the TV reports, with singers', async () => {
+      fetchSpy.mockImplementation(async (url) => ({
+        ok: true,
+        json: async () => String(url).startsWith('/api/get-room')
+          ? { songs: [], tvQueue: [{ ...song1, id: 'req-1', singerName: 'Alex' }] }
+          : { ok: true },
+      }))
+      setup()
+      typeName('Alex')
+      typeRoom('ABCD')
+      addToQueue()
+      expect(await screen.findByTestId('queue-list')).toHaveTextContent('🎤 Alex')
     })
 
     it('remembers the singer name on this device', () => {

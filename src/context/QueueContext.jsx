@@ -88,14 +88,23 @@ function reducer(state, action) {
     }
 
     case 'MERGE_REMOTE_SONGS': {
+      // Each request has its own id, so history is not checked: a song played earlier
+      // (even in a previous session) can be requested again. Skipping ids already
+      // playing or queued just guards against the same request arriving twice.
       const seen = new Set([
         ...(state.current ? [state.current.id] : []),
         ...state.queue.map((s) => s.id),
-        ...state.history.map((s) => s.id),
       ])
-      const incoming = action.songs.filter((s) => !seen.has(s.id))
-      if (incoming.length === 0) return state
-      return { ...state, queue: [...state.queue, ...incoming] }
+      // "Play Next" requests jump to the front (the latest one first, like ADD_NEXT);
+      // everything else joins the end in the order it was requested.
+      let queue = state.queue
+      for (const { playNext, ...song } of action.songs) {
+        if (seen.has(song.id)) continue
+        seen.add(song.id)
+        queue = playNext ? [song, ...queue] : [...queue, song]
+      }
+      if (queue === state.queue) return state
+      return { ...state, queue }
     }
 
     default:

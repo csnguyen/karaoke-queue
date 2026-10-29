@@ -16,7 +16,6 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import KaraokePlayer from '../components/KaraokePlayer'
 import { useQueue } from '../context/QueueContext'
-import { useMultiDeviceSync } from '../hooks/useMultiDeviceSync'
 import { useRoomSync } from '../hooks/useRoomSync'
 import { useResizableSidebar } from '../hooks/useResizableSidebar'
 import { QRCodeSVG } from 'qrcode.react'
@@ -110,7 +109,6 @@ function SortableTVQueueItem({ song, index, onPlayNow, compact }) {
 }
 
 export default function TVView() {
-  useMultiDeviceSync() // safe now — uses mergeRemoteSongs, never overwrites current
   const { current, queue, skip, skipTo, reorder, paused, setPaused, togglePause } = useQueue()
   const { roomCode, syncError, createRoom, lastCommand } = useRoomSync()
   // Only process commands pushed after this TV session started
