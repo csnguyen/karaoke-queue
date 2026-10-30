@@ -1,7 +1,6 @@
 import { Redis } from '@upstash/redis'
+import { CODE_RE, touchRoom } from './_room.js'
 const kv = Redis.fromEnv()
-
-const CODE_RE = /^[A-Z0-9]{4}$/
 const VALID_COMMANDS = ['pause', 'resume', 'skip']
 
 export default async function handler(req, res) {
@@ -20,5 +19,6 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: 'Room not found or expired' })
   }
   await kv.set(`room:${roomCode}:command`, JSON.stringify({ type: command, seq: Date.now() }))
+  await touchRoom(kv, roomCode)
   res.status(200).json({ ok: true })
 }

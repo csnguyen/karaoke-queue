@@ -30,6 +30,9 @@ const COMPACT_SIDEBAR_WIDTH = 340
 const QR_MIN_SIZE = 140
 const QR_MAX_SIZE = 240
 const QR_SCALE = 0.75
+// Idle QR in the video area: drawn at 320px, shrunk on short screens so the steps still fit
+const IDLE_QR_SIZE = 320
+const IDLE_QR_CSS_SIZE = 'min(320px, 38vh)'
 
 // Browsers only allow autoplay with sound after someone has clicked or pressed a key
 function useHasInteracted() {
@@ -51,6 +54,33 @@ function useHasInteracted() {
 
 function thumbnailFor(song) {
   return song.thumbnail ?? `https://i.ytimg.com/vi/${song.videoId}/mqdefault.jpg`
+}
+
+// QR code that opens the phone page in this TV's room, or a placeholder until the room exists
+function JoinQR({ joinUrl, roomCode, syncError, size, style }) {
+  if (!joinUrl) {
+    return (
+      <div
+        className="bg-gray-800 rounded-lg flex items-center justify-center text-center text-xs text-gray-500 px-4"
+        style={{ width: size + 16, height: size + 16, ...style }}
+        data-testid="join-qr-pending"
+      >
+        {syncError ? 'Room unavailable — reload to retry' : 'Creating room…'}
+      </div>
+    )
+  }
+  return (
+    <div className="bg-white rounded-lg p-2" data-testid="join-qr" data-join-url={joinUrl}>
+      <QRCodeSVG
+        value={joinUrl}
+        size={size}
+        level="M"
+        marginSize={1}
+        title={`Scan to join room ${roomCode}`}
+        style={style}
+      />
+    </div>
+  )
 }
 
 function SortableTVQueueItem({ song, index, onPlayNow, compact }) {
@@ -186,8 +216,6 @@ export default function TVView() {
     }).catch(() => {})
   }, [current, queue, roomCode])
 
-  const joinHost = typeof window !== 'undefined' ? window.location.host : ''
-
   return (
     <div
       className={`h-screen bg-black text-white flex flex-col lg:flex-row overflow-hidden ${resizing ? 'select-none cursor-col-resize' : ''}`}
@@ -210,15 +238,22 @@ export default function TVView() {
               maxVideoHeight={`calc(100vh - ${NOW_PLAYING_BAR_HEIGHT})`}
             />
           ) : (
-            <div className="text-center px-8" data-testid="player-empty">
-              <p className="text-3xl font-semibold text-gray-300">No song playing</p>
-              <p className="mt-4 text-lg text-gray-500">
-                On your phone, open <span className="text-white font-medium">{joinHost}</span>
-              </p>
-              <p className="text-lg text-gray-500">
-                and enter room code{' '}
-                <span className="text-purple-300 font-mono font-bold tracking-widest">{roomCode ?? '…'}</span>
-              </p>
+            <div className="flex flex-col items-center text-center px-8" data-testid="player-empty">
+              <p className="text-4xl font-bold text-white">Scan to add songs</p>
+              <div className="mt-6">
+                <JoinQR
+                  joinUrl={joinUrl}
+                  roomCode={roomCode}
+                  syncError={syncError}
+                  size={IDLE_QR_SIZE}
+                  style={{ width: IDLE_QR_CSS_SIZE, height: IDLE_QR_CSS_SIZE }}
+                />
+              </div>
+              <ol className="mt-6 text-xl text-gray-300 space-y-1 text-left list-decimal list-inside" data-testid="join-steps">
+                <li>Scan the code with your phone's camera</li>
+                <li>Enter your name</li>
+                <li>Search for a song and add it</li>
+              </ol>
               {!hasInteracted && (
                 <p className="mt-6 text-sm text-gray-400" data-testid="interact-hint">
                   Tip: click anywhere on this screen once so songs can start with sound
@@ -304,28 +339,15 @@ export default function TVView() {
           </div>
         </div>
 
-        <section className="px-5 pb-4 border-b border-gray-800 flex flex-col items-center shrink-0" aria-label="Join from your phone">
-          <p className="text-base font-semibold text-white mb-2">Scan to add songs</p>
-          {joinUrl ? (
-            <div className="bg-white rounded-lg p-2" data-testid="join-qr" data-join-url={joinUrl}>
-              <QRCodeSVG
-                value={joinUrl}
-                size={qrSize}
-                level="M"
-                marginSize={1}
-                title={`Scan to join room ${roomCode}`}
-              />
-            </div>
-          ) : (
-            <div
-              className="bg-gray-800 rounded-lg flex items-center justify-center text-center text-xs text-gray-500 px-4"
-              style={{ width: qrSize + 16, height: qrSize + 16 }}
-              data-testid="join-qr-pending"
-            >
-              {syncError ? 'Room unavailable — reload to retry' : 'Creating room…'}
-            </div>
-          )}
-        </section>
+        {/* While nothing plays, the big QR code fills the video area instead */}
+        {current ? (
+          <section className="px-5 pb-4 border-b border-gray-800 flex flex-col items-center shrink-0" aria-label="Join from your phone">
+            <p className="text-base font-semibold text-white mb-2">Scan to add songs</p>
+            <JoinQR joinUrl={joinUrl} roomCode={roomCode} syncError={syncError} size={qrSize} />
+          </section>
+        ) : (
+          <div className="border-b border-gray-800 shrink-0" />
+        )}
 
         <div className="px-5 pt-4 pb-2 flex items-center justify-between shrink-0">
           <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">

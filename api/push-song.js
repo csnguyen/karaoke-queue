@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Redis } from '@upstash/redis'
+import { CODE_RE, touchRoom } from './_room.js'
 const kv = Redis.fromEnv()
-
-const CODE_RE = /^[A-Z0-9]{4}$/
-const ROOM_TTL = 28800
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -32,6 +30,6 @@ export default async function handler(req, res) {
   // rpush is atomic — safe under concurrent requests
   await kv.rpush(`room:${roomCode}:songs`, JSON.stringify(song))
   // Refresh TTL so active rooms don't expire mid-party
-  await kv.expire(`room:${roomCode}:meta`, ROOM_TTL)
+  await touchRoom(kv, roomCode)
   res.status(200).json({ ok: true, id: song.id })
 }

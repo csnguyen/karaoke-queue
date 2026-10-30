@@ -1,7 +1,6 @@
 import { Redis } from '@upstash/redis'
+import { CODE_RE, touchRoom } from './_room.js'
 const kv = Redis.fromEnv()
-
-const CODE_RE = /^[A-Z0-9]{4}$/
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -19,5 +18,6 @@ export default async function handler(req, res) {
     kv.set(`room:${roomCode}:current`, JSON.stringify(song ?? null)),
     kv.set(`room:${roomCode}:queue`, JSON.stringify(queue ?? [])),
   ])
+  await touchRoom(kv, roomCode)
   res.status(200).json({ ok: true })
 }

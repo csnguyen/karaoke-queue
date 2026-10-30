@@ -282,7 +282,7 @@ describe('MobileView', () => {
       typeName('  Alex  ')
       typeRoom('abcd')
       addToQueue()
-      expect(screen.getByTestId('toast')).toHaveTextContent(`Added to queue: ${song1.title}`)
+      expect(await screen.findByTestId('toast')).toHaveTextContent(`Added to queue: ${song1.title}`)
       expect(screen.getByTestId('join-room-btn')).toHaveTextContent('✓ ABCD')
       await waitFor(() => expect(pushSongCalls()).toHaveLength(1))
       const body = JSON.parse(pushSongCalls()[0][1].body)
@@ -294,7 +294,7 @@ describe('MobileView', () => {
       typeName('Alex')
       typeRoom('ABCD')
       playNext()
-      expect(screen.getByTestId('toast')).toHaveTextContent(`Playing next: ${song1.title}`)
+      expect(await screen.findByTestId('toast')).toHaveTextContent(`Playing next: ${song1.title}`)
       await waitFor(() => expect(pushSongCalls()).toHaveLength(1))
       expect(JSON.parse(pushSongCalls()[0][1].body).playNext).toBe(true)
     })
@@ -320,6 +320,46 @@ describe('MobileView', () => {
       typeRoom('ABCD')
       addToQueue()
       expect(await screen.findByTestId('queue-list')).toHaveTextContent('🎤 Alex')
+    })
+
+    it('flags a room code that does not exist as soon as it is joined', async () => {
+      fetchSpy.mockImplementation(async (url) => String(url).startsWith('/api/get-room')
+        ? { ok: false, status: 404, json: async () => ({ error: 'Room not found or expired' }) }
+        : { ok: true, json: async () => ({ ok: true }) })
+      setup()
+      typeName('Alex')
+      typeRoom('1953')
+      fireEvent.click(screen.getByTestId('join-room-btn'))
+      expect(await screen.findByTestId('room-error')).toHaveTextContent("Room 1953 wasn't found")
+      expect(screen.getByTestId('join-room-btn')).toHaveTextContent('Join')
+      expect(screen.getByLabelText('Room')).toHaveAttribute('aria-invalid', 'true')
+
+      addToQueue()
+      expect(screen.getByTestId('toast')).toHaveTextContent("Room 1953 wasn't found")
+      expect(pushSongCalls()).toHaveLength(0)
+    })
+
+    it('says the room was not found when the TV rejects a song for that reason', async () => {
+      fetchSpy.mockImplementation(async (url) => url === '/api/push-song'
+        ? { ok: false, status: 404, json: async () => ({ error: 'Room not found or expired' }) }
+        : { ok: true, json: async () => ({ songs: [] }) })
+      setup()
+      typeName('Alex')
+      typeRoom('ABCD')
+      addToQueue()
+      await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent("Room ABCD wasn't found"))
+    })
+
+    it('asks to try again for other failures, and never claims success', async () => {
+      fetchSpy.mockImplementation(async (url) => url === '/api/push-song'
+        ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, json: async () => ({ songs: [] }) })
+      setup()
+      typeName('Alex')
+      typeRoom('ABCD')
+      addToQueue()
+      await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(`Couldn't add "${song1.title}" — please try again`))
+      expect(screen.getByTestId('toast')).not.toHaveTextContent('Added to queue')
     })
 
     it('remembers the singer name on this device', () => {

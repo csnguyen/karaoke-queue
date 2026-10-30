@@ -126,9 +126,31 @@ describe('TVView', () => {
 
     it('is drawn at 75% of the previous size', async () => {
       // jsdom fallback width 260 → previous size max(140, 260 - 120) = 140 → 75% = 105
-      renderTV({ current: null, queue: [], history: [] })
+      renderTV({ current: song1, queue: [], history: [] })
       const svg = (await screen.findByTestId('join-qr')).querySelector('svg')
       expect(svg).toHaveAttribute('width', '105')
+    })
+
+    it('fills the empty video area with the QR code and steps when nothing is playing', async () => {
+      renderTV({ current: null, queue: [], history: [] })
+      const empty = screen.getByTestId('player-empty')
+      const qr = await screen.findByTestId('join-qr')
+      expect(empty).toContainElement(qr)
+      expect(empty).toHaveTextContent('Scan to add songs')
+      expect(screen.getByTestId('join-steps')).toHaveTextContent(/Scan the code.*Enter your name.*Search for a song/)
+      // No address or room code to read and mistype (ignoring the QR's hidden SVG title)
+      const visible = empty.cloneNode(true)
+      visible.querySelector('[data-testid=join-qr]').remove()
+      expect(visible.textContent).not.toContain(window.location.host)
+      expect(visible.textContent).not.toContain('TEST')
+      expect(screen.getAllByTestId('join-qr')).toHaveLength(1)
+    })
+
+    it('moves the QR code back to the sidebar once a song is playing', async () => {
+      renderTV({ current: song1, queue: [], history: [] })
+      const qr = await screen.findByTestId('join-qr')
+      expect(qr.closest('aside')).not.toBeNull()
+      expect(screen.queryByTestId('player-empty')).not.toBeInTheDocument()
     })
 
     it('shows a placeholder until the room exists', () => {

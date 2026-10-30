@@ -1,7 +1,7 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { useRoomSync, pushSongToRoom, POLL_INTERVAL_MS } from '../hooks/useRoomSync'
+import { useRoomSync, pushSongToRoom, POLL_INTERVAL_MS, KEEP_ALIVE_MS } from '../hooks/useRoomSync'
 import { QueueProvider, useQueue } from '../context/QueueContext'
 
 const wrapper = ({ children }) => React.createElement(QueueProvider, null, children)
@@ -73,7 +73,53 @@ describe('get-room API — malformed code validation', () => {
     })
     const { result } = renderHook(() => useRoomSync(), { wrapper })
     await act(async () => { await result.current.createRoom() })
-    await waitFor(() => expect(result.current.syncError).toMatch(/Sync failed: 404/))
+    await waitFor(() => expect(result.current.syncError).toMatch(/Room GONE not found/))
+  })
+})
+
+// ─── TV keeps its room alive ──────────────────────────────────────────────────
+
+describe('TV room lifetime', () => {
+  it('asks the server to keep the room alive on its first poll, then every few minutes', async () => {
+    vi.useFakeTimers()
+    try {
+      const spy = mockFetch((url) => {
+        if (url === '/api/create-room') return makeOkJson({ code: 'LIVE' })
+        return makeOkJson({ songs: [] })
+      })
+      const { result } = renderHook(() => useRoomSync(), { wrapper })
+      await act(async () => { await result.current.createRoom() })
+      await act(async () => {})
+      const polls = () => spy.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/get-room'))
+      expect(polls()[0]).toBe('/api/get-room?code=LIVE&touch=1')
+
+      await act(async () => { vi.advanceTimersByTime(POLL_INTERVAL_MS) })
+      expect(polls().at(-1)).toBe('/api/get-room?code=LIVE')
+
+      await act(async () => { vi.advanceTimersByTime(KEEP_ALIVE_MS) })
+      expect(polls().some((url, i) => i > 0 && url.endsWith('&touch=1'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('re-creates a missing room under the same code so the QR code keeps working', async () => {
+    let roomExists = false
+    const createBodies = []
+    mockFetch((url, opts) => {
+      if (url === '/api/create-room') {
+        const body = JSON.parse(opts?.body ?? '{}')
+        createBodies.push(body)
+        roomExists = true
+        return makeOkJson({ code: body.code ?? 'SAME' })
+      }
+      return roomExists ? makeOkJson({ songs: [] }) : makeErrorJson(404, { error: 'Room not found or expired' })
+    })
+    const { result } = renderHook(() => useRoomSync(), { wrapper })
+    await act(async () => { await result.current.createRoom() })
+    roomExists = false // the room expires on the server
+    await waitFor(() => expect(createBodies).toContainEqual({ code: 'SAME' }), { timeout: 4000 })
+    expect(result.current.roomCode).toBe('SAME')
   })
 })
 

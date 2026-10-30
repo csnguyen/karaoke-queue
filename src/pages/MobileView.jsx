@@ -24,6 +24,9 @@ const SINGER_STORAGE_KEY = 'karaoke-singer-name'
 const SINGER_MAX_LENGTH = 30
 const ROOM_CODE_RE = /^[A-Z0-9]{4}$/
 
+const roomNotFoundMessage = (code) =>
+  `Room ${code} wasn't found — check the code on the TV, or scan its QR code`
+
 const FIELD_LABEL_CLASS = 'w-12 shrink-0 text-sm font-semibold text-gray-300'
 const FIELD_INPUT_CLASS =
   'flex-1 min-w-0 px-2.5 py-2 bg-gray-700 rounded-lg text-white text-sm placeholder-gray-400 outline-none focus:ring-2'
@@ -119,7 +122,10 @@ export default function MobileView() {
   useEffect(() => () => clearTimeout(toastTimerRef.current), [])
   const { current, queue, removeSong, reorder } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
-  const { tvCurrent, tvQueue: remoteTvQueue } = useRoomPoll(activeRoom, { mergeSongs: false })
+  const { tvCurrent, tvQueue: remoteTvQueue, roomNotFound } = useRoomPoll(activeRoom, { mergeSongs: false })
+  // Checked as soon as a code is joined, so a mistyped code is caught before adding songs
+  const roomMissing = !!activeRoom && roomNotFound
+  const shownRoomError = roomError ?? (roomMissing ? roomNotFoundMessage(activeRoom) : null)
   // When in a room, mirror TV's state; fall back to local state otherwise
   const nowPlaying = activeRoom ? (tvCurrent ?? null) : current
   const displayQueue = activeRoom && remoteTvQueue !== undefined ? remoteTvQueue : queue
@@ -191,14 +197,24 @@ export default function MobileView() {
         return
       }
 
+      if (room === activeRoom && roomMissing) {
+        roomInputRef.current?.focus()
+        showToast(`⚠ ${roomNotFoundMessage(room)}`)
+        return
+      }
+
       // The TV owns the queue; the room assigns each request its own id
       const song = { ...result, singerName: name }
-      showToast(mode === 'next' ? `▶ Playing next: ${song.title}` : `✓ Added to queue: ${song.title}`)
-      try { await pushSongToRoom(room, song, name, { playNext: mode === 'next' }) } catch {
-        showToast(`⚠ Couldn't send "${song.title}" to the TV — check the room code`)
+      try {
+        await pushSongToRoom(room, song, name, { playNext: mode === 'next' })
+        showToast(mode === 'next' ? `▶ Playing next: ${song.title}` : `✓ Added to queue: ${song.title}`)
+      } catch (err) {
+        showToast(err.status === 404
+          ? `⚠ ${roomNotFoundMessage(room)}`
+          : `⚠ Couldn't add "${song.title}" — please try again`)
       }
     },
-    [activeRoom, roomCodeInput, showToast, singerName]
+    [activeRoom, roomMissing, roomCodeInput, showToast, singerName]
   )
 
   useEffect(() => {
@@ -251,13 +267,13 @@ export default function MobileView() {
             placeholder="Room Code (4 letter code on TV)"
             required
             aria-required="true"
-            aria-invalid={!!roomError}
-            aria-describedby={roomError ? 'room-error' : undefined}
+            aria-invalid={!!shownRoomError}
+            aria-describedby={shownRoomError ? 'room-error' : undefined}
             autoCapitalize="characters"
             autoComplete="off"
             maxLength={4}
             className={`${FIELD_INPUT_CLASS} font-mono tracking-widest uppercase placeholder:font-sans placeholder:tracking-normal placeholder:normal-case placeholder:text-xs ${
-              roomError ? INVALID_RING_CLASS : 'focus:ring-purple-500'
+              shownRoomError ? INVALID_RING_CLASS : 'focus:ring-purple-500'
             }`}
             data-testid="room-code-input"
           />
@@ -266,11 +282,11 @@ export default function MobileView() {
             className="px-2.5 py-2 bg-purple-800 hover:bg-purple-700 rounded-lg font-medium text-sm transition-colors whitespace-nowrap shrink-0"
             data-testid="join-room-btn"
           >
-            {activeRoom ? `✓ ${activeRoom}` : 'Join'}
+            {activeRoom && !roomMissing ? `✓ ${activeRoom}` : 'Join'}
           </button>
         </form>
-        {roomError && (
-          <p id="room-error" className={FIELD_ERROR_CLASS} data-testid="room-error">{roomError}</p>
+        {shownRoomError && (
+          <p id="room-error" className={FIELD_ERROR_CLASS} data-testid="room-error">{shownRoomError}</p>
         )}
 
         <form onSubmit={handleSearch} className="flex items-center gap-2 mt-2">
