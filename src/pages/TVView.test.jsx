@@ -69,6 +69,15 @@ describe('TVView', () => {
     expect(screen.getByText('Hotel California')).toBeInTheDocument()
   })
 
+  it('Play on a song mid-queue plays it now and keeps every other song in order', () => {
+    const song4 = { id: '4', title: 'Sweet Child', artist: "Guns N' Roses", videoId: 'vid4' }
+    renderTV({ current: song1, queue: [song2, song3, song4], history: [] })
+    fireEvent.click(screen.getByTestId('tv-play-btn-1'))
+    expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Yesterday')
+    const queued = [...screen.getByTestId('tv-queue-list').querySelectorAll('li')].map((li) => li.querySelector('p').textContent)
+    expect(queued).toEqual(['Hotel California', 'Sweet Child'])
+  })
+
   it('shows queue count in the panel header', () => {
     renderTV({ current: song1, queue: [song2, song3], history: [] })
     expect(screen.getByText(/Up Next — 2 songs/i)).toBeInTheDocument()

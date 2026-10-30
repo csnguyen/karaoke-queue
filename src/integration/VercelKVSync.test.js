@@ -361,6 +361,8 @@ describe('TV applying phone commands', () => {
     roomCommands.push({ type: 'playNow', songId: 'c' })
     await poll()
     expect(result.current.queue.current.id).toBe('c')
+    // Songs that were ahead of it stay queued, in order
+    expect(ids(result.current.queue.queue)).toEqual(['b'])
   })
 
   it('ignores a "next" for a song that has already finished', async () => {

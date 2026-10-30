@@ -74,17 +74,17 @@ function reducer(state, action) {
     case 'RESTORE':
       return action.state
 
+    // Plays one queued song now; the songs ahead of and behind it stay queued in order
     case 'SKIP_TO': {
       const { index } = action
       if (index < 0 || index >= state.queue.length) return state
-      const target = state.queue[index]
-      const skipped = state.queue.slice(0, index)
-      const remaining = state.queue.slice(index + 1)
-      const newHistory = [
-        ...(state.current ? [...state.history, state.current] : state.history),
-        ...skipped,
-      ]
-      return { ...state, current: target, queue: remaining, history: newHistory, paused: false }
+      return {
+        ...state,
+        current: state.queue[index],
+        queue: state.queue.filter((_, i) => i !== index),
+        history: state.current ? [...state.history, state.current] : state.history,
+        paused: false,
+      }
     }
 
     // Remote commands from phones refer to songs by request id, since a phone's view of
