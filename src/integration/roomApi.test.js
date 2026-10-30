@@ -128,6 +128,17 @@ describe('room API', () => {
       expect(stored()).toEqual([])
     })
 
+    it('keeps who sent it, trimmed and capped, and ignores non-text names', async () => {
+      await send({ type: 'pause', by: `  ${'S'.repeat(40)}  ` })
+      await send({ type: 'resume', by: 42 })
+      await send({ type: 'resume', by: '   ' })
+      expect(stored()).toEqual([
+        { type: 'pause', by: 'S'.repeat(30) },
+        { type: 'resume' },
+        { type: 'resume' },
+      ])
+    })
+
     it('drops extra fields a phone might send', async () => {
       await send({ type: 'pause', songId: 'r1', evil: true })
       expect(stored()).toEqual([{ type: 'pause' }])

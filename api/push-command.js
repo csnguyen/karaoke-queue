@@ -41,8 +41,10 @@ export default async function handler(req, res) {
   if (!meta) {
     return res.status(404).json({ error: 'Room not found or expired' })
   }
+  // Who sent it, from the phone's "Your Name" field, so the TV can say who did what
+  const by = typeof command.by === 'string' ? command.by.trim().slice(0, 30) : ''
   // Append-only, so the TV applies every command once and in order
-  await kv.rpush(roomKey(roomCode, 'commands'), JSON.stringify({ type: command.type, ...fields }))
+  await kv.rpush(roomKey(roomCode, 'commands'), JSON.stringify({ type: command.type, ...fields, ...(by && { by }) }))
   await touchRoom(kv, roomCode)
   res.status(200).json({ ok: true })
 }

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import TVView from './TVView'
+import { ACTIVITY_TOAST_MS } from '../components/ActivityToasts'
 
 const song1 = { id: '1', title: 'Bohemian Rhapsody', artist: 'Queen', videoId: 'vid1' }
 const song2 = { id: '2', title: 'Hotel California', artist: 'Eagles', videoId: 'vid2' }
@@ -107,6 +108,96 @@ describe('TVView', () => {
   it('shows the current song in the sidebar Now Playing panel', () => {
     renderTV({ current: song1, queue: [], history: [] })
     expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Bohemian Rhapsody')
+  })
+
+  describe('activity notices', () => {
+    const toastTexts = () => screen.queryAllByTestId('activity-toast').map((t) => t.textContent)
+
+    // Serves one poll's worth of requests and commands, then nothing new
+    function roomWith({ songs = [], commands = [] }) {
+      globalThis.fetch.mockImplementation(async (url) => ({
+        ok: true,
+        status: 200,
+        json: async () => String(url).startsWith('/api/get-room')
+          ? { songs, commands }
+          : { code: 'TEST', songs: [] },
+      }))
+    }
+
+    it("shows who added, moved, removed, paused and played songs from their phones", async () => {
+      const queued = [
+        { id: 'r2', videoId: 'v2', title: 'Hotel California', singerName: 'Sam' },
+        { id: 'r3', videoId: 'v3', title: 'Yesterday', singerName: 'Priya' },
+      ]
+      roomWith({
+        songs: [{ id: 'r4', videoId: 'v4', title: 'Sweet Child', singerName: 'Jordan', playNext: true }],
+        commands: [
+          { type: 'move', songId: 'r3', afterId: 'r4', by: 'Alex' },
+          { type: 'remove', songId: 'r2', by: 'Kim' },
+          { type: 'pause', by: 'Sam' },
+        ],
+      })
+      renderTV({ current: { ...song1, id: 'r1' }, queue: queued, history: [] })
+      await vi.waitFor(() => expect(toastTexts()).toHaveLength(3))
+      // At most three at once: the earliest (Jordan's request) has already scrolled off
+      expect(toastTexts()).toEqual([
+        'Alex moved “Yesterday” up to #2',
+        'Kim removed “Hotel California”',
+        'Sam paused “Bohemian Rhapsody”',
+      ])
+      expect(screen.getByTestId('tv-queue-list')).not.toHaveTextContent('Hotel California')
+      expect(screen.getByTestId('tv-play-pause-btn')).toHaveAccessibleName('Play')
+    })
+
+    it('shows song requests with the singer, including Play Next', async () => {
+      roomWith({ songs: [{ id: 'r9', videoId: 'v9', title: 'Yesterday', singerName: 'Priya', playNext: true }] })
+      renderTV({ current: song1, queue: [song2], history: [] })
+      await vi.waitFor(() => expect(toastTexts()).toEqual(['Priya added “Yesterday” to play next']))
+    })
+
+    it("labels the TV's own controls as TV", () => {
+      renderTV({ current: song1, queue: [song2, song3], history: [], paused: false })
+      fireEvent.click(screen.getByTestId('tv-play-pause-btn'))
+      fireEvent.click(screen.getByTestId('tv-play-btn-1'))
+      fireEvent.click(screen.getByRole('button', { name: 'Remove Hotel California from the queue' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }))
+      expect(toastTexts()).toEqual([
+        'TV paused “Bohemian Rhapsody”',
+        'TV played “Yesterday” now',
+        'TV removed “Hotel California”',
+      ])
+    })
+
+    it('stays quiet when a song simply finishes', () => {
+      renderTV({ current: song1, queue: [song2], history: [] })
+      const iframe = screen.getByTestId('youtube-iframe')
+      fireEvent(window, new MessageEvent('message', {
+        data: JSON.stringify({ event: 'onStateChange', info: 0 }),
+        source: iframe.contentWindow,
+      }))
+      expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Hotel California')
+      expect(toastTexts()).toEqual([])
+    })
+
+    it('fades each notice after a few seconds', () => {
+      vi.useFakeTimers()
+      try {
+        renderTV({ current: song1, queue: [song2], history: [] })
+        fireEvent.click(screen.getByTestId('tv-play-pause-btn'))
+        expect(toastTexts()).toHaveLength(1)
+        act(() => { vi.advanceTimersByTime(ACTIVITY_TOAST_MS) })
+        expect(toastTexts()).toEqual([])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('sits at the bottom of the sidebar', () => {
+      renderTV({ current: song1, queue: [song2], history: [] })
+      const toasts = screen.getByTestId('activity-toasts')
+      expect(toasts.closest('aside')).not.toBeNull()
+      expect(toasts).toHaveClass('bottom-3')
+    })
   })
 
   describe('when nothing is playing', () => {

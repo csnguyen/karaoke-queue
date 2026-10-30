@@ -16,7 +16,10 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import KaraokePlayer from '../components/KaraokePlayer'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { useQueue } from '../context/QueueContext'
+import ActivityToasts, { useActivityToasts } from '../components/ActivityToasts'
+import { useQueue, reducer } from '../context/QueueContext'
+import { planCommands, describeRequest } from '../activity'
+import { planMove } from '../queueMove'
 import { useRoomSync } from '../hooks/useRoomSync'
 import { useResizableSidebar } from '../hooks/useResizableSidebar'
 import { QRCodeSVG } from 'qrcode.react'
@@ -148,24 +151,34 @@ function SortableTVQueueItem({ song, index, onPlayNow, onRemove, compact }) {
 }
 
 export default function TVView() {
-  const {
-    current, queue, skip, skipTo, reorder, paused, setPaused, togglePause,
-    playSongNow, moveSong, skipIfCurrent, removeSong,
-  } = useQueue()
+  const { current, queue, history, paused, skip, dispatch } = useQueue()
+  const { toasts, announce } = useActivityToasts()
+  // Latest queue state, for working out what a command will change before applying it
+  const stateRef = useRef(null)
+  stateRef.current = { current, queue, history, paused }
 
-  // Phone remote: commands arrive in the order they were sent and each is applied once
-  const handleCommands = useCallback((commands) => {
-    for (const command of commands) {
-      if (command.type === 'pause') setPaused(true)
-      else if (command.type === 'resume') setPaused(false)
-      else if (command.type === 'skip') skipIfCurrent(command.currentId ?? null)
-      else if (command.type === 'playNow') playSongNow(command.songId)
-      else if (command.type === 'move') moveSong(command.songId, command.afterId ?? null)
-      else if (command.type === 'remove') removeSong(command.songId)
-    }
-  }, [setPaused, skipIfCurrent, playSongNow, moveSong, removeSong])
+  // Applies commands in order (phone remote or the TV's own buttons) and announces
+  // who did what. Song requests in the same batch were already added to the queue.
+  const applyCommands = useCallback((commands, { requests = [] } = {}) => {
+    let base = stateRef.current
+    if (requests.length > 0) base = reducer(base, { type: 'MERGE_REMOTE_SONGS', songs: requests })
+    const { actions, events } = planCommands(base, commands)
+    actions.forEach(dispatch)
+    announce([...requests.map(describeRequest), ...events])
+  }, [dispatch, announce])
 
-  const { roomCode, syncError, createRoom } = useRoomSync({ onCommands: handleCommands })
+  const handleRoomEvents = useCallback(
+    ({ requests, commands }) => applyCommands(commands, { requests }),
+    [applyCommands]
+  )
+
+  // The TV's own controls, announced as "TV"
+  const runOnTV = useCallback((command) => applyCommands([{ ...command, by: 'TV' }]), [applyCommands])
+  const togglePlayback = () => runOnTV({ type: paused ? 'resume' : 'pause' })
+  const nextSong = () => runOnTV({ type: 'skip', currentId: current?.id ?? null })
+  const playNow = (index) => runOnTV({ type: 'playNow', songId: queue[index].id })
+
+  const { roomCode, syncError, createRoom } = useRoomSync({ onRoomEvents: handleRoomEvents })
   const [songToRemove, setSongToRemove] = useState(null)
   // Narrowest sidebar that keeps the app name and room code on one line; used as the
   // default and minimum width. Measured from the rendered header, since fonts vary by device.
@@ -200,12 +213,10 @@ export default function TVView() {
 
   const handleDragEnd = useCallback(
     ({ active, over }) => {
-      if (!over || active.id === over.id) return
-      const oldIndex = queue.findIndex((s) => s.id === active.id)
-      const newIndex = queue.findIndex((s) => s.id === over.id)
-      if (oldIndex !== -1 && newIndex !== -1) reorder(oldIndex, newIndex)
+      const move = over && planMove(queue, active.id, over.id)
+      if (move) runOnTV({ type: 'move', songId: active.id, afterId: move.afterId })
     },
-    [queue, reorder]
+    [queue, runOnTV]
   )
 
   useEffect(() => {
@@ -248,7 +259,7 @@ export default function TVView() {
               song={current}
               onSkip={skip}
               externalPaused={paused}
-              onTogglePause={togglePause}
+              onTogglePause={togglePlayback}
               showControls={false}
               maxVideoHeight={`calc(100vh - ${NOW_PLAYING_BAR_HEIGHT})`}
             />
@@ -304,7 +315,7 @@ export default function TVView() {
 
           <div className="flex gap-3 shrink-0">
             <button
-              onClick={togglePause}
+              onClick={togglePlayback}
               disabled={!current}
               className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-full font-medium transition-colors whitespace-nowrap"
               aria-label={paused ? 'Play' : 'Pause'}
@@ -313,7 +324,7 @@ export default function TVView() {
               {paused ? '▶ Play' : '⏸ Pause'}
             </button>
             <button
-              onClick={skip}
+              onClick={nextSong}
               disabled={!current && queue.length === 0}
               className="px-5 py-2.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed rounded-full font-medium transition-colors whitespace-nowrap"
               aria-label="Next Song"
@@ -338,7 +349,7 @@ export default function TVView() {
       </div>
 
       {/* Right: app name + room code, join QR, up next */}
-      <aside className="w-full lg:w-[var(--sidebar-w)] shrink-0 min-h-0 max-h-[55vh] lg:max-h-none bg-gray-900 border-t lg:border-t-0 border-gray-800 flex flex-col">
+      <aside className="relative w-full lg:w-[var(--sidebar-w)] shrink-0 min-h-0 max-h-[55vh] lg:max-h-none bg-gray-900 border-t lg:border-t-0 border-gray-800 flex flex-col">
         <div
           ref={headerRef}
           className="px-5 pt-4 pb-3 flex items-end justify-between gap-3 shrink-0"
@@ -386,7 +397,7 @@ export default function TVView() {
                     key={song.id}
                     song={song}
                     index={i}
-                    onPlayNow={skipTo}
+                    onPlayNow={playNow}
                     onRemove={setSongToRemove}
                     compact={compactQueue}
                   />
@@ -401,6 +412,8 @@ export default function TVView() {
             {syncError}
           </p>
         )}
+
+        <ActivityToasts toasts={toasts} />
       </aside>
 
       {songToRemove && (
@@ -408,7 +421,7 @@ export default function TVView() {
           title="Remove this song?"
           message={`“${songToRemove.title}”${songToRemove.singerName ? ` (🎤 ${songToRemove.singerName})` : ''} will be taken out of the queue.`}
           confirmLabel="Remove"
-          onConfirm={() => { removeSong(songToRemove.id); setSongToRemove(null) }}
+          onConfirm={() => { runOnTV({ type: 'remove', songId: songToRemove.id }); setSongToRemove(null) }}
           onCancel={() => setSongToRemove(null)}
         />
       )}

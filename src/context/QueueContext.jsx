@@ -26,7 +26,8 @@ function saveToStorage(state) {
   }
 }
 
-function reducer(state, action) {
+// Exported so the TV can work out what a remote command will change before applying it
+export function reducer(state, action) {
   switch (action.type) {
     case 'ADD_SONG':
       return { ...state, queue: [...state.queue, action.song] }
@@ -52,9 +53,11 @@ function reducer(state, action) {
       return { ...state, paused: !state.paused }
 
     case 'SET_PAUSED':
-      return { ...state, paused: action.paused }
+      return state.paused === action.paused ? state : { ...state, paused: action.paused }
 
+    // Actions that change nothing return the same state, so callers can tell
     case 'REMOVE_SONG':
+      if (!state.queue.some((s) => s.id === action.id)) return state
       return { ...state, queue: state.queue.filter((s) => s.id !== action.id) }
 
     case 'REORDER': {
@@ -166,7 +169,7 @@ export function QueueProvider({ children, initialStateOverride }) {
   const skipTo = useCallback((index) => dispatch({ type: 'SKIP_TO', index }), [])
 
   return (
-    <QueueContext.Provider value={{ ...state, addSong, addNext, skip, skipTo, removeSong, reorder, panicRecover, restore, mergeRemoteSongs, togglePause, setPaused, playSongNow, moveSong, skipIfCurrent }}>
+    <QueueContext.Provider value={{ ...state, dispatch, addSong, addNext, skip, skipTo, removeSong, reorder, panicRecover, restore, mergeRemoteSongs, togglePause, setPaused, playSongNow, moveSong, skipIfCurrent }}>
       {children}
     </QueueContext.Provider>
   )

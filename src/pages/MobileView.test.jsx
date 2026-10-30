@@ -81,6 +81,16 @@ describe('MobileView', () => {
       expect(card).toHaveTextContent('🎤 Alex')
     })
 
+    it('signs commands with the name in "Your Name"', async () => {
+      tv.current = req('r1', 'Bohemian Rhapsody', 'Alex')
+      localStorage.setItem('karaoke-singer-name', 'Chris')
+      renderMobile({ current: null, queue: [], history: [] })
+      await screen.findByTestId('now-playing')
+      fireEvent.click(screen.getByRole('button', { name: 'Next Song' }))
+      await waitFor(() => expect(commands).toEqual([{ type: 'skip', currentId: 'r1', by: 'Chris' }]))
+      localStorage.removeItem('karaoke-singer-name')
+    })
+
     it('Next sends a skip for the song it saw playing', async () => {
       tv.current = req('r1', 'Bohemian Rhapsody', 'Alex')
       renderMobile({ current: null, queue: [], history: [] })

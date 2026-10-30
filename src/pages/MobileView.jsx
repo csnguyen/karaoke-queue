@@ -226,14 +226,15 @@ export default function MobileView() {
       return false
     }
     try {
-      await pushCommandToRoom(activeRoom, command)
+      // Signed with "Your Name" so the TV can show who did it
+      await pushCommandToRoom(activeRoom, { ...command, by: singerName.trim() || undefined })
       if (successMessage) showToast(successMessage)
       return true
     } catch (err) {
       showToast(err.status === 404 ? `⚠ ${roomNotFoundMessage(activeRoom)}` : "⚠ Couldn't reach the TV — please try again")
       return false
     }
-  }, [connected, activeRoom, showToast])
+  }, [connected, activeRoom, showToast, singerName])
 
   const togglePlayback = async () => {
     const pause = !paused

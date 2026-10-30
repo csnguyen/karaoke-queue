@@ -8,9 +8,9 @@ export const KEEP_ALIVE_MS = 5 * 60 * 1000
 const RECLAIM_RETRY_MS = 30 * 1000
 
 // Polls a room code. The TV (mergeSongs: true) adds newly requested songs to its queue and
-// hands new phone commands to onCommands; phones read the TV's current song, queue and
-// paused state from the response.
-export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, onRoomNotFound, onCommands } = {}) {
+// hands each poll's new requests and phone commands to onRoomEvents; phones read the TV's
+// current song, queue and paused state from the response.
+export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, onRoomNotFound, onRoomEvents } = {}) {
   const [syncError, setSyncError] = useState(null)
   // True when the server says this room doesn't exist (wrong code, or it expired)
   const [roomNotFound, setRoomNotFound] = useState(false)
@@ -28,8 +28,8 @@ export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, on
   const lastTouchRef = useRef(0)
   const onRoomNotFoundRef = useRef(onRoomNotFound)
   onRoomNotFoundRef.current = onRoomNotFound
-  const onCommandsRef = useRef(onCommands)
-  onCommandsRef.current = onCommands
+  const onRoomEventsRef = useRef(onRoomEvents)
+  onRoomEventsRef.current = onRoomEvents
 
   useEffect(() => {
     if (!roomCode) return
@@ -55,20 +55,23 @@ export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, on
         const { songs, commands, current, tvQueue, tvPaused } = await res.json()
         if (activeRef.current) {
           if (touch) lastTouchRef.current = Date.now()
+          let freshRequests = []
           if (mergeSongs) {
             const requests = songs ?? []
             // A shorter list means the room was re-created; start reading from the top
             if (requests.length < consumedRef.current) consumedRef.current = 0
-            const fresh = requests.slice(consumedRef.current)
+            freshRequests = requests.slice(consumedRef.current)
             consumedRef.current = requests.length
-            if (fresh.length > 0) mergeRemoteSongs(fresh)
+            if (freshRequests.length > 0) mergeRemoteSongs(freshRequests)
           }
-          if (onCommandsRef.current) {
+          if (onRoomEventsRef.current) {
             const list = commands ?? []
             if (list.length < commandsConsumedRef.current) commandsConsumedRef.current = 0
-            const fresh = list.slice(commandsConsumedRef.current)
+            const freshCommands = list.slice(commandsConsumedRef.current)
             commandsConsumedRef.current = list.length
-            if (fresh.length > 0) onCommandsRef.current(fresh)
+            if (freshRequests.length > 0 || freshCommands.length > 0) {
+              onRoomEventsRef.current({ requests: freshRequests, commands: freshCommands })
+            }
           }
           if (current !== undefined) setTvCurrent(current)
           if (tvQueue !== undefined) setTvQueue(tvQueue)
@@ -92,8 +95,9 @@ export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, on
   return { syncError, roomNotFound, tvCurrent, tvQueue, tvPaused }
 }
 
-// onCommands receives each batch of new phone commands, oldest first
-export function useRoomSync({ onCommands } = {}) {
+// onRoomEvents receives each poll's new song requests and phone commands, oldest first.
+// The requests have already been added to the queue; the commands are for the TV to apply.
+export function useRoomSync({ onRoomEvents } = {}) {
   const [roomCode, setRoomCode] = useState(null)
   const [createError, setCreateError] = useState(null)
   const lastReclaimRef = useRef(0)
@@ -128,7 +132,7 @@ export function useRoomSync({ onCommands } = {}) {
   const { syncError: pollError } = useRoomPoll(roomCode, {
     keepAlive: true,
     onRoomNotFound: reclaimRoom,
-    onCommands,
+    onRoomEvents,
   })
   const syncError = createError ?? pollError
 
@@ -151,7 +155,8 @@ async function postJson(url, body) {
 }
 
 // command: { type: 'pause' | 'resume' } | { type: 'skip', currentId }
-//        | { type: 'playNow', songId } | { type: 'move', songId, afterId }
+//        | { type: 'playNow' | 'remove', songId } | { type: 'move', songId, afterId }
+// plus an optional `by` (the sender's name) shown on the TV
 export function pushCommandToRoom(roomCode, command) {
   return postJson('/api/push-command', { roomCode, command })
 }

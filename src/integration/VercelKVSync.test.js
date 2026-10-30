@@ -318,7 +318,7 @@ describe('TV applying phone commands', () => {
     })
     function useTV() {
       const queue = useQueue()
-      const onCommands = React.useCallback((commands) => {
+      const onRoomEvents = React.useCallback(({ commands }) => {
         for (const c of commands) {
           if (c.type === 'pause') queue.setPaused(true)
           else if (c.type === 'resume') queue.setPaused(false)
@@ -328,7 +328,7 @@ describe('TV applying phone commands', () => {
           else if (c.type === 'remove') queue.removeSong(c.songId)
         }
       }, [queue.setPaused, queue.skipIfCurrent, queue.playSongNow, queue.moveSong, queue.removeSong])
-      return { room: useRoomSync({ onCommands }), queue }
+      return { room: useRoomSync({ onRoomEvents }), queue }
     }
     const stateWrapper = ({ children }) =>
       React.createElement(QueueProvider, { initialStateOverride: initialState }, children)
