@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import { QueueProvider } from '../context/QueueContext'
 import TVView from './TVView'
 
@@ -76,6 +76,27 @@ describe('TVView', () => {
     expect(screen.getByTestId('tv-now-playing')).toHaveTextContent('Yesterday')
     const queued = [...screen.getByTestId('tv-queue-list').querySelectorAll('li')].map((li) => li.querySelector('p').textContent)
     expect(queued).toEqual(['Hotel California', 'Sweet Child'])
+  })
+
+  it('× on a queued song asks first, then removes only that song', () => {
+    renderTV({ current: song1, queue: [song2, song3], history: [] })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Hotel California from the queue' }))
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Hotel California')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByTestId('tv-queue-list')).not.toHaveTextContent('Hotel California')
+    expect(screen.getByTestId('tv-queue-list')).toHaveTextContent('Yesterday')
+  })
+
+  it('Escape or Cancel closes the dialog without removing', () => {
+    renderTV({ current: song1, queue: [song2], history: [] })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Hotel California from the queue' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Hotel California from the queue' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByTestId('tv-queue-list')).toHaveTextContent('Hotel California')
   })
 
   it('shows queue count in the panel header', () => {

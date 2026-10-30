@@ -1,9 +1,20 @@
 import { useState, useCallback, useRef } from 'react'
 
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
+
+// The YouTube API returns titles HTML-escaped ("Rock &amp; Roll", "Don&#39;t")
+export function decodeHtmlEntities(text = '') {
+  return String(text ?? '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
+    if (entity[0] !== '#') return NAMED_ENTITIES[entity.toLowerCase()] ?? match
+    const code = entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10)
+    try { return String.fromCodePoint(code) } catch { return match }
+  })
+}
+
 // Keyword priority: lyrics (top) > vocals > video > official
 // "karaoke" is intentionally NOT scored — it correlates with low-quality channels.
 function scoreKaraokeResult(snippet) {
-  const t = (snippet.title ?? '').toLowerCase()
+  const t = decodeHtmlEntities(snippet.title).toLowerCase()
   let score = 0
 
   // 1. Lyrics — primary quality signal
@@ -80,8 +91,8 @@ async function fetchAndScore(apiKey, query, pageToken = null) {
       return {
         id: videoId,
         videoId,
-        title: item.snippet.title,
-        artist: item.snippet.channelTitle,
+        title: decodeHtmlEntities(item.snippet.title),
+        artist: decodeHtmlEntities(item.snippet.channelTitle),
         thumbnail,
         viewCount: stats.viewCount,
         likeCount: stats.likeCount,

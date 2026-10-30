@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useYouTubeSearch } from './useYouTubeSearch'
+import { useYouTubeSearch, decodeHtmlEntities } from './useYouTubeSearch'
 
 // Search result item with thumbnail
 const fakeItem = (id, title, channel = 'SingChannel') => ({
@@ -244,5 +244,23 @@ describe('useYouTubeSearch', () => {
     // Search results still returned, just without view/like boost
     expect(result.current.results).toHaveLength(1)
     expect(result.current.error).toBeNull()
+  })
+
+  it('decodes HTML-escaped titles and channel names from the API', async () => {
+    mockBoth(
+      [fakeItem('v1', 'Rock &amp; Roll (with lyrics &amp; Sing along) Don&#39;t &quot;Stop&quot;', 'Tom &amp; Jerry')],
+      [fakeStats('v1')],
+    )
+    const { result } = renderHook(() => useYouTubeSearch('fake-key'))
+    await act(async () => { await result.current.search('Song') })
+    expect(result.current.results[0].title).toBe('Rock & Roll (with lyrics & Sing along) Don\'t "Stop"')
+    expect(result.current.results[0].artist).toBe('Tom & Jerry')
+  })
+})
+
+describe('decodeHtmlEntities', () => {
+  it('handles named, decimal and hex entities and leaves unknown ones alone', () => {
+    expect(decodeHtmlEntities('a &lt;b&gt; &#233; &#x1F3A4; &bogus; &amp;amp;')).toBe('a <b> é 🎤 &bogus; &amp;')
+    expect(decodeHtmlEntities(undefined)).toBe('')
   })
 })

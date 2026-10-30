@@ -139,6 +139,45 @@ describe('MobileView', () => {
       expect(await screen.findByTestId('toast')).toHaveTextContent('Playing now: Hotel California')
     })
 
+    it('× asks for confirmation; Cancel keeps the song and sends nothing', async () => {
+      tv.tvQueue = [req('r1', 'Bohemian Rhapsody', 'Alex'), req('r2', 'Hotel California', 'Sam')]
+      renderMobile({ current: null, queue: [], history: [] })
+      openQueueTab()
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove Hotel California from the queue' }))
+      const dialog = screen.getByRole('alertdialog')
+      expect(dialog).toHaveTextContent('Remove this song?')
+      expect(dialog).toHaveTextContent('Hotel California')
+      expect(dialog).toHaveTextContent('🎤 Sam')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+      expect(screen.getByTestId('queue-list')).toHaveTextContent('Hotel California')
+      expect(commands).toEqual([])
+    })
+
+    it('confirming removes the song straight away and tells the TV', async () => {
+      tv.tvQueue = [req('r1', 'Bohemian Rhapsody', 'Alex'), req('r2', 'Hotel California', 'Sam')]
+      renderMobile({ current: null, queue: [], history: [] })
+      openQueueTab()
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove Hotel California from the queue' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }))
+      expect(screen.getByTestId('queue-list')).not.toHaveTextContent('Hotel California')
+      await waitFor(() => expect(commands).toEqual([{ type: 'remove', songId: 'r2' }]))
+      expect(await screen.findByTestId('toast')).toHaveTextContent('Removed: Hotel California')
+    })
+
+    it('puts the song back if the TV could not be reached', async () => {
+      tv.tvQueue = [req('r1', 'Bohemian Rhapsody', 'Alex'), req('r2', 'Hotel California', 'Sam')]
+      fetchSpy.mockImplementation(async (url) => url === '/api/push-command'
+        ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, json: async () => ({ songs: [], commands: [], ...tv }) })
+      renderMobile({ current: null, queue: [], history: [] })
+      openQueueTab()
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove Hotel California from the queue' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }))
+      expect(await screen.findByTestId('toast')).toHaveTextContent("Couldn't reach the TV")
+      await waitFor(() => expect(screen.getByTestId('queue-list')).toHaveTextContent('Hotel California'))
+    })
+
     it('says when the queue is empty', async () => {
       renderMobile({ current: null, queue: [], history: [] })
       openQueueTab()
@@ -198,6 +237,14 @@ describe('MobileView', () => {
   })
 
 
+
+  it('uses 16px text in every field so iPhone browsers do not zoom in on tap', () => {
+    renderMobile({ current: null, queue: [], history: [] })
+    for (const label of ['Your Name', 'Room', 'Song']) {
+      expect(screen.getByLabelText(label)).toHaveClass('text-base')
+      expect(screen.getByLabelText(label).className).not.toMatch(/(^|\s)text-(xs|sm)(\s|$)/)
+    }
+  })
 
   describe('top fields', () => {
     it('labels each field on the left with helper text inside', () => {

@@ -110,16 +110,18 @@ describe('room API', () => {
       await send({ type: 'playNow', songId: 'r3' })
       await send({ type: 'skip', currentId: 'r3' })
       await send({ type: 'pause' })
+      await send({ type: 'remove', songId: 'r4' })
       expect(stored()).toEqual([
         { type: 'move', songId: 'r2', afterId: null },
         { type: 'playNow', songId: 'r3' },
         { type: 'skip', currentId: 'r3' },
         { type: 'pause' },
+        { type: 'remove', songId: 'r4' },
       ])
     })
 
     it('rejects unknown or malformed commands', async () => {
-      for (const bad of [{ type: 'delete' }, { type: 'playNow' }, { type: 'move', afterId: 'x' }, { type: 'skip', currentId: 7 }, null]) {
+      for (const bad of [{ type: 'delete' }, { type: 'playNow' }, { type: 'remove' }, { type: 'move', afterId: 'x' }, { type: 'skip', currentId: 7 }, null]) {
         const res = await send(bad)
         expect(res.statusCode).toBe(400)
       }

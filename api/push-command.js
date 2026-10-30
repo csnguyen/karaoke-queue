@@ -17,6 +17,7 @@ const COMMANDS = {
     return currentId === undefined ? undefined : { currentId }
   },
   playNow: (b) => (isId(b.songId) ? { songId: b.songId } : undefined),
+  remove: (b) => (isId(b.songId) ? { songId: b.songId } : undefined),
   move: (b) => {
     const afterId = optionalId(b.afterId)
     return isId(b.songId) && afterId !== undefined ? { songId: b.songId, afterId } : undefined

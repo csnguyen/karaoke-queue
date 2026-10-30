@@ -20,6 +20,7 @@ import { pushSongToRoom, pushCommandToRoom, useRoomPoll } from '../hooks/useRoom
 import { APP_NAME } from '../appName'
 import { roomCodeFromSearch } from '../roomLink'
 import { planMove } from '../queueMove'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 const SINGER_STORAGE_KEY = 'karaoke-singer-name'
 const SINGER_MAX_LENGTH = 30
@@ -35,8 +36,10 @@ function thumbnailFor(song) {
 }
 
 const FIELD_LABEL_CLASS = 'w-12 shrink-0 text-sm font-semibold text-gray-300'
+// 16px text: iPhone browsers zoom the page into any field with smaller text when it's tapped.
+// Placeholders can stay smaller (set per field) since only the typed text size matters.
 const FIELD_INPUT_CLASS =
-  'flex-1 min-w-0 px-2.5 py-2 bg-gray-700 rounded-lg text-white text-sm placeholder-gray-400 outline-none focus:ring-2'
+  'flex-1 min-w-0 px-2.5 py-2 bg-gray-700 rounded-lg text-white text-base placeholder-gray-400 outline-none focus:ring-2'
 const INVALID_RING_CLASS = 'ring-2 ring-red-500 focus:ring-red-500'
 // Indented to line up under the inputs (label width + gap)
 const FIELD_ERROR_CLASS = 'text-red-400 text-xs mt-1 ml-14'
@@ -58,7 +61,7 @@ function SingerLine({ song }) {
 }
 
 // Same row as the TV sidebar: drag handle, thumbnail, title, singer and Play
-function SortableQueueItem({ song, index, onPlayNow }) {
+function SortableQueueItem({ song, index, onPlayNow, onRemove }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: song.id })
 
@@ -98,6 +101,14 @@ function SortableQueueItem({ song, index, onPlayNow }) {
         data-testid={`queue-play-btn-${index}`}
       >
         ▶ Play
+      </button>
+      <button
+        onClick={() => onRemove(song)}
+        className="w-8 h-8 -mr-1.5 shrink-0 flex items-center justify-center rounded-full text-gray-500 hover:text-red-400 active:bg-gray-700 text-xl leading-none"
+        aria-label={`Remove ${song.title} from the queue`}
+        data-testid={`queue-remove-btn-${index}`}
+      >
+        ×
       </button>
     </li>
   )
@@ -163,14 +174,31 @@ export default function MobileView() {
   // Optimistic changes, shown until the TV's next update reflects them (or they time out)
   const [pendingOrder, setPendingOrder] = useState(null) // { ids, expires }
   const [pendingPaused, setPendingPaused] = useState(null) // { value, expires }
+  const [pendingRemovals, setPendingRemovals] = useState({}) // { [songId]: expires }
+  const [songToRemove, setSongToRemove] = useState(null)
 
   const displayQueue = useMemo(() => {
-    const base = tvQueue ?? []
+    const base = (tvQueue ?? []).filter((s) => !(s.id in pendingRemovals))
     if (!pendingOrder) return base
     const rank = new Map(pendingOrder.ids.map((id, i) => [id, i]))
     // Songs added on the TV since the drag keep their place at the end
     return [...base].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
-  }, [tvQueue, pendingOrder])
+  }, [tvQueue, pendingOrder, pendingRemovals])
+
+  // A removed song stays hidden until the TV's queue no longer lists it
+  useEffect(() => {
+    const ids = Object.keys(pendingRemovals)
+    if (ids.length === 0) return
+    const listed = new Set((tvQueue ?? []).map((s) => s.id))
+    const stillPending = ids.filter((id) => listed.has(id) && pendingRemovals[id] > Date.now())
+    if (stillPending.length !== ids.length) {
+      setPendingRemovals(Object.fromEntries(stillPending.map((id) => [id, pendingRemovals[id]])))
+      return
+    }
+    const soonest = Math.min(...ids.map((id) => pendingRemovals[id]))
+    const timer = setTimeout(() => setPendingRemovals((p) => ({ ...p })), soonest - Date.now())
+    return () => clearTimeout(timer)
+  }, [tvQueue, pendingRemovals])
 
   useEffect(() => {
     if (!pendingOrder) return
@@ -218,6 +246,15 @@ export default function MobileView() {
 
   const playNow = (song) =>
     sendCommand({ type: 'playNow', songId: song.id }, `▶ Playing now: ${song.title}`)
+
+  const confirmRemove = async () => {
+    const song = songToRemove
+    setSongToRemove(null)
+    if (!song) return
+    setPendingRemovals((p) => ({ ...p, [song.id]: Date.now() + PENDING_MS }))
+    const sent = await sendCommand({ type: 'remove', songId: song.id }, `Removed: ${song.title}`)
+    if (!sent) setPendingRemovals(({ [song.id]: _, ...rest }) => rest)
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -380,7 +417,7 @@ export default function MobileView() {
             aria-describedby={singerError ? 'singer-error' : undefined}
             autoComplete="nickname"
             maxLength={SINGER_MAX_LENGTH}
-            className={`${FIELD_INPUT_CLASS} ${singerError ? INVALID_RING_CLASS : 'focus:ring-purple-500'}`}
+            className={`${FIELD_INPUT_CLASS} placeholder:text-sm ${singerError ? INVALID_RING_CLASS : 'focus:ring-purple-500'}`}
             data-testid="singer-input"
           />
         </div>
@@ -433,7 +470,7 @@ export default function MobileView() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search song or artist name"
-              className={`${FIELD_INPUT_CLASS} w-full focus:ring-purple-500 ${query ? 'pr-9' : ''}`}
+              className={`${FIELD_INPUT_CLASS} w-full placeholder:text-sm focus:ring-purple-500 ${query ? 'pr-9' : ''}`}
               data-testid="search-input"
             />
             {query && (
@@ -555,7 +592,13 @@ export default function MobileView() {
                 <SortableContext items={displayQueue.map((s) => s.id)} strategy={verticalListSortingStrategy}>
                   <ul className="space-y-2" data-testid="queue-list">
                     {displayQueue.map((song, i) => (
-                      <SortableQueueItem key={song.id} song={song} index={i} onPlayNow={playNow} />
+                      <SortableQueueItem
+                        key={song.id}
+                        song={song}
+                        index={i}
+                        onPlayNow={playNow}
+                        onRemove={setSongToRemove}
+                      />
                     ))}
                   </ul>
                 </SortableContext>
@@ -563,6 +606,16 @@ export default function MobileView() {
             </>
           )}
         </section>
+      )}
+
+      {songToRemove && (
+        <ConfirmDialog
+          title="Remove this song?"
+          message={`“${songToRemove.title}”${songToRemove.singerName ? ` (🎤 ${songToRemove.singerName})` : ''} will be taken out of the queue.`}
+          confirmLabel="Remove"
+          onConfirm={confirmRemove}
+          onCancel={() => setSongToRemove(null)}
+        />
       )}
 
       {toast && (

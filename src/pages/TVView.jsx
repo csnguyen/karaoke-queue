@@ -15,6 +15,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import KaraokePlayer from '../components/KaraokePlayer'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { useQueue } from '../context/QueueContext'
 import { useRoomSync } from '../hooks/useRoomSync'
 import { useResizableSidebar } from '../hooks/useResizableSidebar'
@@ -83,7 +84,7 @@ function JoinQR({ joinUrl, roomCode, syncError, size, style }) {
   )
 }
 
-function SortableTVQueueItem({ song, index, onPlayNow, compact }) {
+function SortableTVQueueItem({ song, index, onPlayNow, onRemove, compact }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: song.id })
 
@@ -134,6 +135,14 @@ function SortableTVQueueItem({ song, index, onPlayNow, compact }) {
       >
         {compact ? '▶' : '▶ Play'}
       </button>
+      <button
+        onClick={() => onRemove(song)}
+        className="w-7 h-7 shrink-0 flex items-center justify-center rounded-full text-gray-500 hover:text-red-400 hover:bg-gray-700 text-lg leading-none"
+        aria-label={`Remove ${song.title} from the queue`}
+        data-testid={`tv-remove-btn-${index}`}
+      >
+        ×
+      </button>
     </li>
   )
 }
@@ -141,7 +150,7 @@ function SortableTVQueueItem({ song, index, onPlayNow, compact }) {
 export default function TVView() {
   const {
     current, queue, skip, skipTo, reorder, paused, setPaused, togglePause,
-    playSongNow, moveSong, skipIfCurrent,
+    playSongNow, moveSong, skipIfCurrent, removeSong,
   } = useQueue()
 
   // Phone remote: commands arrive in the order they were sent and each is applied once
@@ -152,10 +161,12 @@ export default function TVView() {
       else if (command.type === 'skip') skipIfCurrent(command.currentId ?? null)
       else if (command.type === 'playNow') playSongNow(command.songId)
       else if (command.type === 'move') moveSong(command.songId, command.afterId ?? null)
+      else if (command.type === 'remove') removeSong(command.songId)
     }
-  }, [setPaused, skipIfCurrent, playSongNow, moveSong])
+  }, [setPaused, skipIfCurrent, playSongNow, moveSong, removeSong])
 
   const { roomCode, syncError, createRoom } = useRoomSync({ onCommands: handleCommands })
+  const [songToRemove, setSongToRemove] = useState(null)
   // Narrowest sidebar that keeps the app name and room code on one line; used as the
   // default and minimum width. Measured from the rendered header, since fonts vary by device.
   const headerRef = useRef(null)
@@ -371,7 +382,14 @@ export default function TVView() {
             <SortableContext items={queue.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <ul className="flex-1 min-h-0 overflow-y-auto px-5 pb-5 space-y-2" data-testid="tv-queue-list">
                 {queue.map((song, i) => (
-                  <SortableTVQueueItem key={song.id} song={song} index={i} onPlayNow={skipTo} compact={compactQueue} />
+                  <SortableTVQueueItem
+                    key={song.id}
+                    song={song}
+                    index={i}
+                    onPlayNow={skipTo}
+                    onRemove={setSongToRemove}
+                    compact={compactQueue}
+                  />
                 ))}
               </ul>
             </SortableContext>
@@ -384,6 +402,16 @@ export default function TVView() {
           </p>
         )}
       </aside>
+
+      {songToRemove && (
+        <ConfirmDialog
+          title="Remove this song?"
+          message={`“${songToRemove.title}”${songToRemove.singerName ? ` (🎤 ${songToRemove.singerName})` : ''} will be taken out of the queue.`}
+          confirmLabel="Remove"
+          onConfirm={() => { removeSong(songToRemove.id); setSongToRemove(null) }}
+          onCancel={() => setSongToRemove(null)}
+        />
+      )}
     </div>
   )
 }

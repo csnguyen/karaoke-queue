@@ -325,8 +325,9 @@ describe('TV applying phone commands', () => {
           else if (c.type === 'skip') queue.skipIfCurrent(c.currentId ?? null)
           else if (c.type === 'playNow') queue.playSongNow(c.songId)
           else if (c.type === 'move') queue.moveSong(c.songId, c.afterId ?? null)
+          else if (c.type === 'remove') queue.removeSong(c.songId)
         }
-      }, [queue.setPaused, queue.skipIfCurrent, queue.playSongNow, queue.moveSong])
+      }, [queue.setPaused, queue.skipIfCurrent, queue.playSongNow, queue.moveSong, queue.removeSong])
       return { room: useRoomSync({ onCommands }), queue }
     }
     const stateWrapper = ({ children }) =>
@@ -376,6 +377,15 @@ describe('TV applying phone commands', () => {
     roomCommands.push({ type: 'skip', currentId: 'b' })
     await poll()
     expect(result.current.queue.current.id).toBe('c')
+  })
+
+  it('removes a song by id and keeps the rest', async () => {
+    const { result, roomCommands, poll } = await setupTV({
+      current: song('a'), queue: [song('b'), song('c'), song('d')], history: [], paused: false,
+    })
+    roomCommands.push({ type: 'remove', songId: 'c' })
+    await poll()
+    expect(ids(result.current.queue.queue)).toEqual(['b', 'd'])
   })
 
   it('leaves the order alone when a move refers to a song that already played', async () => {
