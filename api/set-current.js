@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
-  const { roomCode, song, queue } = req.body ?? {}
+  const { roomCode, song, queue, paused } = req.body ?? {}
   if (!roomCode || !CODE_RE.test(roomCode)) {
     return res.status(400).json({ error: 'Invalid room code' })
   }
@@ -17,6 +17,7 @@ export default async function handler(req, res) {
   await Promise.all([
     kv.set(`room:${roomCode}:current`, JSON.stringify(song ?? null)),
     kv.set(`room:${roomCode}:queue`, JSON.stringify(queue ?? [])),
+    kv.set(`room:${roomCode}:paused`, JSON.stringify(paused === true)),
   ])
   await touchRoom(kv, roomCode)
   res.status(200).json({ ok: true })

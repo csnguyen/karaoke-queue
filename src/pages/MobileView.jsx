@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react'
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   DndContext,
   closestCenter,
+  KeyboardSensor,
   PointerSensor,
   TouchSensor,
   useSensor,
@@ -9,16 +10,16 @@ import {
 } from '@dnd-kit/core'
 import {
   SortableContext,
+  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable,
-  arrayMove,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useQueue } from '../context/QueueContext'
 import { useYouTubeSearch } from '../hooks/useYouTubeSearch'
-import { pushSongToRoom, useRoomPoll } from '../hooks/useRoomSync'
+import { pushSongToRoom, pushCommandToRoom, useRoomPoll } from '../hooks/useRoomSync'
 import { APP_NAME } from '../appName'
 import { roomCodeFromSearch } from '../roomLink'
+import { planMove } from '../queueMove'
 
 const SINGER_STORAGE_KEY = 'karaoke-singer-name'
 const SINGER_MAX_LENGTH = 30
@@ -26,6 +27,12 @@ const ROOM_CODE_RE = /^[A-Z0-9]{4}$/
 
 const roomNotFoundMessage = (code) =>
   `Room ${code} wasn't found — check the code on the TV, or scan its QR code`
+// How long an optimistic change (reorder, play/pause) is shown while waiting for the TV
+const PENDING_MS = 8000
+
+function thumbnailFor(song) {
+  return song.thumbnail ?? `https://i.ytimg.com/vi/${song.videoId}/mqdefault.jpg`
+}
 
 const FIELD_LABEL_CLASS = 'w-12 shrink-0 text-sm font-semibold text-gray-300'
 const FIELD_INPUT_CLASS =
@@ -50,45 +57,68 @@ function SingerLine({ song }) {
   return <p className="text-xs text-purple-300 truncate">🎤 {song.singerName}</p>
 }
 
-function SortableQueueItem({ song, index, onRemove }) {
+// Same row as the TV sidebar: drag handle, thumbnail, title, singer and Play
+function SortableQueueItem({ song, index, onPlayNow }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: song.id })
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.4 : 1,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
   }
 
   return (
-    <li
-      ref={setNodeRef}
-      style={style}
-      className="flex items-center gap-3 bg-gray-800 rounded-lg p-3 touch-none"
-    >
-      {/* drag handle */}
-      <span
+    <li ref={setNodeRef} style={style} className="relative flex items-center gap-2 bg-gray-800 rounded-lg p-2 pr-3">
+      {/* Only the handle starts a drag, so the list still scrolls normally on touch */}
+      <button
         {...attributes}
         {...listeners}
-        className="text-gray-500 cursor-grab active:cursor-grabbing text-lg select-none px-1"
-        aria-label="Drag to reorder"
+        className="text-gray-500 cursor-grab active:cursor-grabbing text-xl leading-none px-1.5 py-3 touch-none select-none"
+        aria-label={`Drag to reorder ${song.title}`}
+        data-testid={`queue-drag-handle-${index}`}
       >
         ⠿
-      </span>
-      <span className="text-gray-500 text-xs w-4 text-center shrink-0">{index + 1}</span>
+      </button>
+      <img
+        src={thumbnailFor(song)}
+        alt=""
+        className="w-16 aspect-video object-cover rounded shrink-0 bg-gray-700"
+        loading="lazy"
+      />
       <div className="flex-1 min-w-0">
-        <p className="font-medium text-sm truncate">{song.title}</p>
-        <p className="text-xs text-gray-400 truncate">{song.artist}</p>
-        <SingerLine song={song} />
+        <p className="font-medium text-sm leading-snug line-clamp-2">{song.title}</p>
+        {song.singerName ? <SingerLine song={song} /> : <p className="text-xs text-gray-400 truncate">{song.artist}</p>}
       </div>
       <button
-        onClick={() => onRemove(song.id)}
-        className="text-gray-600 hover:text-red-400 transition-colors text-lg leading-none shrink-0"
-        aria-label={`Remove ${song.title}`}
+        onClick={() => onPlayNow(song)}
+        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-full transition-colors whitespace-nowrap shrink-0"
+        aria-label={`Play ${song.title} now`}
+        data-testid={`queue-play-btn-${index}`}
       >
-        ×
+        ▶ Play
       </button>
     </li>
+  )
+}
+
+function TabButton({ id, selected, onSelect, children }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      id={`tab-${id}`}
+      aria-selected={selected}
+      aria-controls={`panel-${id}`}
+      onClick={() => onSelect(id)}
+      className={`flex-1 py-3 text-sm font-semibold border-b-2 transition-colors ${
+        selected ? 'border-purple-400 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'
+      }`}
+      data-testid={`tab-${id}`}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -120,29 +150,90 @@ export default function MobileView() {
   }, [])
 
   useEffect(() => () => clearTimeout(toastTimerRef.current), [])
-  const { current, queue, removeSong, reorder } = useQueue()
   const { results, loading, loadingMore, error, search, loadMore, hasMore } = useYouTubeSearch()
-  const { tvCurrent, tvQueue: remoteTvQueue, roomNotFound } = useRoomPoll(activeRoom, { mergeSongs: false })
+  // The TV owns the queue and playback; the phone mirrors it and sends commands
+  const { tvCurrent, tvQueue, tvPaused, roomNotFound } = useRoomPoll(activeRoom, { mergeSongs: false })
   // Checked as soon as a code is joined, so a mistyped code is caught before adding songs
   const roomMissing = !!activeRoom && roomNotFound
   const shownRoomError = roomError ?? (roomMissing ? roomNotFoundMessage(activeRoom) : null)
-  // When in a room, mirror TV's state; fall back to local state otherwise
-  const nowPlaying = activeRoom ? (tvCurrent ?? null) : current
-  const displayQueue = activeRoom && remoteTvQueue !== undefined ? remoteTvQueue : queue
+  const connected = !!activeRoom && !roomMissing
+  const nowPlaying = activeRoom ? (tvCurrent ?? null) : null
+  const [activeTab, setActiveTab] = useState('results')
+
+  // Optimistic changes, shown until the TV's next update reflects them (or they time out)
+  const [pendingOrder, setPendingOrder] = useState(null) // { ids, expires }
+  const [pendingPaused, setPendingPaused] = useState(null) // { value, expires }
+
+  const displayQueue = useMemo(() => {
+    const base = tvQueue ?? []
+    if (!pendingOrder) return base
+    const rank = new Map(pendingOrder.ids.map((id, i) => [id, i]))
+    // Songs added on the TV since the drag keep their place at the end
+    return [...base].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
+  }, [tvQueue, pendingOrder])
+
+  useEffect(() => {
+    if (!pendingOrder) return
+    // Caught up when the TV lists the dragged songs in the same relative order
+    const pending = new Set(pendingOrder.ids)
+    const tvOrder = (tvQueue ?? []).map((s) => s.id).filter((id) => pending.has(id))
+    const wanted = pendingOrder.ids.filter((id) => tvOrder.includes(id))
+    if (tvOrder.every((id, i) => id === wanted[i])) return setPendingOrder(null)
+    const timer = setTimeout(() => setPendingOrder(null), pendingOrder.expires - Date.now())
+    return () => clearTimeout(timer)
+  }, [tvQueue, pendingOrder])
+
+  const paused = pendingPaused ? pendingPaused.value : tvPaused === true
+  useEffect(() => {
+    if (!pendingPaused) return
+    if (tvPaused === pendingPaused.value) return setPendingPaused(null)
+    const timer = setTimeout(() => setPendingPaused(null), pendingPaused.expires - Date.now())
+    return () => clearTimeout(timer)
+  }, [tvPaused, pendingPaused])
+
+  const sendCommand = useCallback(async (command, successMessage) => {
+    if (!connected) {
+      roomInputRef.current?.focus()
+      showToast(activeRoom ? `⚠ ${roomNotFoundMessage(activeRoom)}` : 'Enter the Room code from the TV first')
+      return false
+    }
+    try {
+      await pushCommandToRoom(activeRoom, command)
+      if (successMessage) showToast(successMessage)
+      return true
+    } catch (err) {
+      showToast(err.status === 404 ? `⚠ ${roomNotFoundMessage(activeRoom)}` : "⚠ Couldn't reach the TV — please try again")
+      return false
+    }
+  }, [connected, activeRoom, showToast])
+
+  const togglePlayback = async () => {
+    const pause = !paused
+    setPendingPaused({ value: pause, expires: Date.now() + PENDING_MS })
+    if (!(await sendCommand({ type: pause ? 'pause' : 'resume' }))) setPendingPaused(null)
+  }
+
+  const nextSong = () =>
+    sendCommand({ type: 'skip', currentId: tvCurrent?.id ?? null }, '⏭ Skipping to the next song')
+
+  const playNow = (song) =>
+    sendCommand({ type: 'playNow', songId: song.id }, `▶ Playing now: ${song.title}`)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
   const handleDragEnd = useCallback(
-    ({ active, over }) => {
-      if (!over || active.id === over.id) return
-      const oldIndex = queue.findIndex((s) => s.id === active.id)
-      const newIndex = queue.findIndex((s) => s.id === over.id)
-      if (oldIndex !== -1 && newIndex !== -1) reorder(oldIndex, newIndex)
+    async ({ active, over }) => {
+      const move = over && planMove(displayQueue, active.id, over.id)
+      if (!move) return
+      const { reordered, afterId } = move
+      setPendingOrder({ ids: reordered.map((s) => s.id), expires: Date.now() + PENDING_MS })
+      if (!(await sendCommand({ type: 'move', songId: active.id, afterId }))) setPendingOrder(null)
     },
-    [queue, reorder]
+    [displayQueue, sendCommand]
   )
 
   const searchInputRef = useRef(null)
@@ -154,7 +245,9 @@ export default function MobileView() {
 
   const handleSearch = (e) => {
     e.preventDefault()
-    if (query.trim()) search(query.trim())
+    if (!query.trim()) return
+    search(query.trim())
+    setActiveTab('results')
   }
 
   const handleRoomCodeChange = (e) => {
@@ -230,6 +323,47 @@ export default function MobileView() {
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
       <header className="p-4 bg-gray-800 border-b border-gray-700">
         <h1 className="text-xl font-bold text-purple-400 mb-3">{APP_NAME}</h1>
+
+        {/* What the TV is playing, with remote controls */}
+        <section
+          className="flex items-center gap-3 bg-gray-900/60 border border-gray-700 rounded-xl p-3 mb-4"
+          aria-label="Now playing"
+          data-testid="now-playing-bar"
+        >
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-semibold text-purple-400 uppercase tracking-widest">Now Playing</p>
+            {nowPlaying ? (
+              <div data-testid="now-playing">
+                <p className="font-semibold text-sm leading-snug line-clamp-2">{nowPlaying.title}</p>
+                {nowPlaying.singerName
+                  ? <SingerLine song={nowPlaying} />
+                  : <p className="text-xs text-gray-400 truncate">{nowPlaying.artist}</p>}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500" data-testid="nothing-playing">
+                {connected ? 'Nothing playing' : 'Join a room to see what’s playing'}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={togglePlayback}
+            disabled={!connected || !nowPlaying}
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full bg-purple-600 hover:bg-purple-500 disabled:opacity-30 disabled:cursor-not-allowed text-lg transition-colors"
+            aria-label={paused ? 'Play' : 'Pause'}
+            data-testid="mobile-play-pause-btn"
+          >
+            {paused ? '▶' : '⏸'}
+          </button>
+          <button
+            onClick={nextSong}
+            disabled={!connected || (!nowPlaying && displayQueue.length === 0)}
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-lg transition-colors"
+            aria-label="Next Song"
+            data-testid="mobile-skip-btn"
+          >
+            ⏭
+          </button>
+        </section>
 
         <div className="flex items-center gap-2 mb-1">
           <label htmlFor="singer-name" className={FIELD_LABEL_CLASS}>Your Name</label>
@@ -326,124 +460,110 @@ export default function MobileView() {
         {error && <p className="text-red-400 text-sm mt-2" data-testid="search-error">{error}</p>}
       </header>
 
-      {results.length > 0 && (
-        <section className="p-4 border-b border-gray-700">
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Results</h2>
-          <ul className="space-y-2" data-testid="search-results">
-            {results.map((song) => (
-              <li key={song.id} className="bg-gray-800 rounded-lg overflow-hidden">
-                {/* Top row: thumbnail + title/meta */}
-                <div className="flex items-start gap-3 p-3">
-                  {song.thumbnail ? (
-                    <img
-                      src={song.thumbnail}
-                      alt=""
-                      className="w-28 h-[63px] object-cover rounded shrink-0"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-28 h-[63px] bg-gray-700 rounded shrink-0 flex items-center justify-center text-gray-600 text-2xl">♪</div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    {/* No truncate — title wraps so full text is readable */}
-                    <p className="font-medium text-sm leading-snug text-white">{song.title}</p>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">{song.artist}</p>
-                    {song.viewCount > 0 && (
-                      <p className="text-xs text-gray-600 mt-0.5">{formatCount(song.viewCount)} views</p>
-                    )}
-                  </div>
-                </div>
-                {/* Bottom row: action buttons */}
-                <div className="flex gap-2 px-3 pb-3">
-                  <button
-                    onClick={() => pushSong(song, 'queue')}
-                    className="flex-1 py-1.5 bg-purple-600 hover:bg-purple-700 text-xs rounded-full font-medium transition-colors"
-                    aria-label={`Add ${song.title} to queue`}
-                  >
-                    + Add to Queue
-                  </button>
-                  <button
-                    onClick={() => pushSong(song, 'next')}
-                    className="flex-1 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-xs rounded-full font-medium transition-colors"
-                    aria-label={`Play ${song.title} next`}
-                  >
-                    ▶ Play Next
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-          {hasMore && (
-            <button
-              onClick={loadMore}
-              disabled={loadingMore}
-              className="w-full mt-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
-              data-testid="load-more-btn"
-            >
-              {loadingMore ? 'Loading…' : 'Load more results'}
-            </button>
+      <div className="sticky top-0 z-20 bg-gray-900 border-b border-gray-700 flex px-4" role="tablist" aria-label="Songs">
+        <TabButton id="results" selected={activeTab === 'results'} onSelect={setActiveTab}>
+          Search Results{results.length > 0 ? ` (${results.length})` : ''}
+        </TabButton>
+        <TabButton id="queue" selected={activeTab === 'queue'} onSelect={setActiveTab}>
+          Song Queue{connected && tvQueue ? ` (${displayQueue.length})` : ''}
+        </TabButton>
+      </div>
+
+      {activeTab === 'results' ? (
+        <section className="flex-1 p-4" role="tabpanel" id="panel-results" aria-labelledby="tab-results">
+          {results.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-8" data-testid="results-empty">
+              {loading ? 'Searching…' : 'Search for a song or artist above'}
+            </p>
+          ) : (
+            <>
+              <ul className="space-y-2" data-testid="search-results">
+                {results.map((song) => (
+                  <li key={song.id} className="bg-gray-800 rounded-lg overflow-hidden">
+                    {/* Top row: thumbnail + title/meta */}
+                    <div className="flex items-start gap-3 p-3">
+                      {song.thumbnail ? (
+                        <img
+                          src={song.thumbnail}
+                          alt=""
+                          className="w-28 h-[63px] object-cover rounded shrink-0"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-28 h-[63px] bg-gray-700 rounded shrink-0 flex items-center justify-center text-gray-600 text-2xl">♪</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        {/* No truncate — title wraps so full text is readable */}
+                        <p className="font-medium text-sm leading-snug text-white">{song.title}</p>
+                        <p className="text-xs text-gray-400 mt-0.5 truncate">{song.artist}</p>
+                        {song.viewCount > 0 && (
+                          <p className="text-xs text-gray-600 mt-0.5">{formatCount(song.viewCount)} views</p>
+                        )}
+                      </div>
+                    </div>
+                    {/* Bottom row: action buttons */}
+                    <div className="flex gap-2 px-3 pb-3">
+                      <button
+                        onClick={() => pushSong(song, 'queue')}
+                        className="flex-1 py-1.5 bg-purple-600 hover:bg-purple-700 text-xs rounded-full font-medium transition-colors"
+                        aria-label={`Add ${song.title} to queue`}
+                      >
+                        + Add to Queue
+                      </button>
+                      <button
+                        onClick={() => pushSong(song, 'next')}
+                        className="flex-1 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-xs rounded-full font-medium transition-colors"
+                        aria-label={`Play ${song.title} next`}
+                      >
+                        ▶ Play Next
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {hasMore && (
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="w-full mt-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+                  data-testid="load-more-btn"
+                >
+                  {loadingMore ? 'Loading…' : 'Load more results'}
+                </button>
+              )}
+            </>
+          )}
+        </section>
+      ) : (
+        <section className="flex-1 p-4" role="tabpanel" id="panel-queue" aria-labelledby="tab-queue">
+          {!connected ? (
+            <p className="text-gray-500 text-sm text-center py-8" data-testid="queue-empty">
+              {roomMissing ? roomNotFoundMessage(activeRoom) : 'Enter the Room code from the TV to see its song queue'}
+            </p>
+          ) : tvQueue === undefined ? (
+            <p className="text-gray-500 text-sm text-center py-8" data-testid="queue-loading">Loading the queue…</p>
+          ) : displayQueue.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-8" data-testid="queue-empty">
+              No songs queued yet — add some from Search Results
+            </p>
+          ) : (
+            <>
+              {displayQueue.length > 1 && (
+                <p className="text-xs text-gray-500 mb-2">Hold ⠿ and drag to reorder</p>
+              )}
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={displayQueue.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+                  <ul className="space-y-2" data-testid="queue-list">
+                    {displayQueue.map((song, i) => (
+                      <SortableQueueItem key={song.id} song={song} index={i} onPlayNow={playNow} />
+                    ))}
+                  </ul>
+                </SortableContext>
+              </DndContext>
+            </>
           )}
         </section>
       )}
-
-      <section className="flex-1 p-4">
-        {/* Now Playing */}
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Now Playing</h2>
-        </div>
-
-        {nowPlaying ? (
-          <div className="bg-purple-900/40 border border-purple-700 rounded-lg p-3 mb-5" data-testid="now-playing">
-            <p className="font-semibold text-sm truncate">{nowPlaying.title}</p>
-            <p className="text-xs text-gray-400 truncate">{nowPlaying.artist}</p>
-            <SingerLine song={nowPlaying} />
-          </div>
-        ) : (
-          <p className="text-gray-600 text-sm mb-5" data-testid="nothing-playing">Nothing playing</p>
-        )}
-
-        {/* Queue — mirrors TV's queue when in a room */}
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-            Queue ({displayQueue.length})
-          </h2>
-          {!activeRoom && displayQueue.length > 1 && (
-            <span className="text-xs text-gray-600">hold & drag to reorder</span>
-          )}
-        </div>
-
-        {displayQueue.length === 0 ? (
-          <p className="text-gray-600 text-sm" data-testid="queue-empty">Search for songs to add to the queue</p>
-        ) : activeRoom ? (
-          <ul className="space-y-2" data-testid="queue-list">
-            {displayQueue.map((song, i) => (
-              <li key={song.id} className="flex items-center gap-3 bg-gray-800 rounded-lg p-3">
-                <span className="text-gray-500 text-xs w-4 text-center shrink-0">{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{song.title}</p>
-                  <p className="text-xs text-gray-400 truncate">{song.artist}</p>
-                  <SingerLine song={song} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={displayQueue.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-              <ul className="space-y-2" data-testid="queue-list">
-                {displayQueue.map((song, i) => (
-                  <SortableQueueItem
-                    key={song.id}
-                    song={song}
-                    index={i}
-                    onRemove={removeSong}
-                  />
-                ))}
-              </ul>
-            </SortableContext>
-          </DndContext>
-        )}
-      </section>
 
       {toast && (
         <div

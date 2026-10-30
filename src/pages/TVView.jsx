@@ -139,10 +139,23 @@ function SortableTVQueueItem({ song, index, onPlayNow, compact }) {
 }
 
 export default function TVView() {
-  const { current, queue, skip, skipTo, reorder, paused, setPaused, togglePause } = useQueue()
-  const { roomCode, syncError, createRoom, lastCommand } = useRoomSync()
-  // Only process commands pushed after this TV session started
-  const lastSeqRef = useRef(Date.now())
+  const {
+    current, queue, skip, skipTo, reorder, paused, setPaused, togglePause,
+    playSongNow, moveSong, skipIfCurrent,
+  } = useQueue()
+
+  // Phone remote: commands arrive in the order they were sent and each is applied once
+  const handleCommands = useCallback((commands) => {
+    for (const command of commands) {
+      if (command.type === 'pause') setPaused(true)
+      else if (command.type === 'resume') setPaused(false)
+      else if (command.type === 'skip') skipIfCurrent(command.currentId ?? null)
+      else if (command.type === 'playNow') playSongNow(command.songId)
+      else if (command.type === 'move') moveSong(command.songId, command.afterId ?? null)
+    }
+  }, [setPaused, skipIfCurrent, playSongNow, moveSong])
+
+  const { roomCode, syncError, createRoom } = useRoomSync({ onCommands: handleCommands })
   // Narrowest sidebar that keeps the app name and room code on one line; used as the
   // default and minimum width. Measured from the rendered header, since fonts vary by device.
   const headerRef = useRef(null)
@@ -197,24 +210,15 @@ export default function TVView() {
     if (!current && queue.length > 0) skip()
   }, [current, queue, skip])
 
-  // Process remote commands from mobile devices
-  useEffect(() => {
-    if (!lastCommand || lastCommand.seq <= lastSeqRef.current) return
-    lastSeqRef.current = lastCommand.seq
-    if (lastCommand.type === 'skip') skip()
-    else if (lastCommand.type === 'pause') setPaused(true)
-    else if (lastCommand.type === 'resume') setPaused(false)
-  }, [lastCommand, skip, setPaused])
-
-  // Push current + queue to KV so all mobile clients stay in sync
+  // Push current song, queue and paused state so every phone mirrors the TV
   useEffect(() => {
     if (!roomCode) return
     fetch('/api/set-current', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomCode, song: current ?? null, queue }),
+      body: JSON.stringify({ roomCode, song: current ?? null, queue, paused }),
     }).catch(() => {})
-  }, [current, queue, roomCode])
+  }, [current, queue, paused, roomCode])
 
   return (
     <div

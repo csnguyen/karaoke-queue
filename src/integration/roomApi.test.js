@@ -28,6 +28,7 @@ vi.mock('@upstash/redis', () => ({
 
 const { default: createRoom } = await import('../../api/create-room.js')
 const { default: getRoom } = await import('../../api/get-room.js')
+const { default: pushCommand } = await import('../../api/push-command.js')
 const { CODE_CHARS, ROOM_TTL } = await import('../../api/_room.js')
 
 function call(handler, req) {
@@ -96,6 +97,43 @@ describe('room API', () => {
       db.values.set('room:LIVE:meta', JSON.stringify({ created: 1 }))
       await call(getRoom, { query: { code: 'LIVE' } })
       expect(db.ttl.has('room:LIVE:meta')).toBe(false)
+    })
+  })
+
+  describe('POST /api/push-command', () => {
+    const send = (command, roomCode = 'LIVE') => call(pushCommand, { method: 'POST', body: { roomCode, command } })
+    const stored = () => (db.values.get('room:LIVE:commands') ?? []).map((v) => JSON.parse(v))
+    beforeEach(() => { db.values.set('room:LIVE:meta', JSON.stringify({ created: 1 })) })
+
+    it('appends each command so none are lost', async () => {
+      await send({ type: 'move', songId: 'r2', afterId: null })
+      await send({ type: 'playNow', songId: 'r3' })
+      await send({ type: 'skip', currentId: 'r3' })
+      await send({ type: 'pause' })
+      expect(stored()).toEqual([
+        { type: 'move', songId: 'r2', afterId: null },
+        { type: 'playNow', songId: 'r3' },
+        { type: 'skip', currentId: 'r3' },
+        { type: 'pause' },
+      ])
+    })
+
+    it('rejects unknown or malformed commands', async () => {
+      for (const bad of [{ type: 'delete' }, { type: 'playNow' }, { type: 'move', afterId: 'x' }, { type: 'skip', currentId: 7 }, null]) {
+        const res = await send(bad)
+        expect(res.statusCode).toBe(400)
+      }
+      expect(stored()).toEqual([])
+    })
+
+    it('drops extra fields a phone might send', async () => {
+      await send({ type: 'pause', songId: 'r1', evil: true })
+      expect(stored()).toEqual([{ type: 'pause' }])
+    })
+
+    it('returns 404 for a room that does not exist', async () => {
+      const res = await send({ type: 'pause' }, 'NONE')
+      expect(res.statusCode).toBe(404)
     })
   })
 })

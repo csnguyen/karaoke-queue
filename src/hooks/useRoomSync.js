@@ -7,29 +7,35 @@ export const KEEP_ALIVE_MS = 5 * 60 * 1000
 // Don't retry re-creating a missing room more often than this
 const RECLAIM_RETRY_MS = 30 * 1000
 
-// Polls a room code. The TV (mergeSongs: true) adds newly requested songs to its queue;
-// phones only read the TV's current song and queue from the response.
-export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, onRoomNotFound } = {}) {
+// Polls a room code. The TV (mergeSongs: true) adds newly requested songs to its queue and
+// hands new phone commands to onCommands; phones read the TV's current song, queue and
+// paused state from the response.
+export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, onRoomNotFound, onCommands } = {}) {
   const [syncError, setSyncError] = useState(null)
   // True when the server says this room doesn't exist (wrong code, or it expired)
   const [roomNotFound, setRoomNotFound] = useState(false)
-  const [lastCommand, setLastCommand] = useState(null)
   const [tvCurrent, setTvCurrent] = useState(undefined)
   const [tvQueue, setTvQueue] = useState(undefined)
+  const [tvPaused, setTvPaused] = useState(undefined)
   const { mergeRemoteSongs } = useQueue()
   const intervalRef = useRef(null)
   const activeRef = useRef(true)
   // The room's song list is append-only, so the TV takes each request exactly once by
   // remembering how many it has read, rather than comparing against what it has played.
   const consumedRef = useRef(0)
+  // Phone commands are an append-only list too, read the same way
+  const commandsConsumedRef = useRef(0)
   const lastTouchRef = useRef(0)
   const onRoomNotFoundRef = useRef(onRoomNotFound)
   onRoomNotFoundRef.current = onRoomNotFound
+  const onCommandsRef = useRef(onCommands)
+  onCommandsRef.current = onCommands
 
   useEffect(() => {
     if (!roomCode) return
     activeRef.current = true
     consumedRef.current = 0
+    commandsConsumedRef.current = 0
     lastTouchRef.current = 0
     setRoomNotFound(false)
 
@@ -46,7 +52,7 @@ export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, on
           return
         }
         if (!res.ok) throw new Error(`Sync failed: ${res.status}`)
-        const { songs, command, current, tvQueue } = await res.json()
+        const { songs, commands, current, tvQueue, tvPaused } = await res.json()
         if (activeRef.current) {
           if (touch) lastTouchRef.current = Date.now()
           if (mergeSongs) {
@@ -57,9 +63,16 @@ export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, on
             consumedRef.current = requests.length
             if (fresh.length > 0) mergeRemoteSongs(fresh)
           }
-          if (command) setLastCommand(command)
+          if (onCommandsRef.current) {
+            const list = commands ?? []
+            if (list.length < commandsConsumedRef.current) commandsConsumedRef.current = 0
+            const fresh = list.slice(commandsConsumedRef.current)
+            commandsConsumedRef.current = list.length
+            if (fresh.length > 0) onCommandsRef.current(fresh)
+          }
           if (current !== undefined) setTvCurrent(current)
           if (tvQueue !== undefined) setTvQueue(tvQueue)
+          if (tvPaused !== undefined) setTvPaused(tvPaused)
           setRoomNotFound(false)
           setSyncError(null)
         }
@@ -76,10 +89,11 @@ export function useRoomPoll(roomCode, { mergeSongs = true, keepAlive = false, on
     }
   }, [roomCode, mergeRemoteSongs, mergeSongs, keepAlive])
 
-  return { syncError, roomNotFound, lastCommand, tvCurrent, tvQueue }
+  return { syncError, roomNotFound, tvCurrent, tvQueue, tvPaused }
 }
 
-export function useRoomSync() {
+// onCommands receives each batch of new phone commands, oldest first
+export function useRoomSync({ onCommands } = {}) {
   const [roomCode, setRoomCode] = useState(null)
   const [createError, setCreateError] = useState(null)
   const lastReclaimRef = useRef(0)
@@ -111,13 +125,14 @@ export function useRoomSync() {
     createRoom(code)
   }, [createRoom])
 
-  const { syncError: pollError, lastCommand } = useRoomPoll(roomCode, {
+  const { syncError: pollError } = useRoomPoll(roomCode, {
     keepAlive: true,
     onRoomNotFound: reclaimRoom,
+    onCommands,
   })
   const syncError = createError ?? pollError
 
-  return { roomCode, syncError, createRoom, lastCommand }
+  return { roomCode, syncError, createRoom }
 }
 
 async function postJson(url, body) {
@@ -135,6 +150,8 @@ async function postJson(url, body) {
   return res.json()
 }
 
+// command: { type: 'pause' | 'resume' } | { type: 'skip', currentId }
+//        | { type: 'playNow', songId } | { type: 'move', songId, afterId }
 export function pushCommandToRoom(roomCode, command) {
   return postJson('/api/push-command', { roomCode, command })
 }

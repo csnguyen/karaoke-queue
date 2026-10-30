@@ -299,3 +299,89 @@ describe('TV queue from room requests', () => {
     expect(queue[0]).not.toHaveProperty('playNext')
   })
 })
+
+// ─── Phone remote commands applied by the TV ─────────────────────────────────
+
+describe('TV applying phone commands', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  const song = (id) => makeSong({ id, videoId: `v-${id}`, title: `Song ${id}` })
+
+  // The room serves an append-only command list; the TV applies each one exactly once
+  async function setupTV(initialState) {
+    const roomCommands = []
+    mockFetch((url) => {
+      if (url === '/api/create-room') return makeOkJson({ code: 'ROOM' })
+      if (String(url).startsWith('/api/get-room')) return makeOkJson({ songs: [], commands: [...roomCommands] })
+      return makeOkJson({ ok: true })
+    })
+    function useTV() {
+      const queue = useQueue()
+      const onCommands = React.useCallback((commands) => {
+        for (const c of commands) {
+          if (c.type === 'pause') queue.setPaused(true)
+          else if (c.type === 'resume') queue.setPaused(false)
+          else if (c.type === 'skip') queue.skipIfCurrent(c.currentId ?? null)
+          else if (c.type === 'playNow') queue.playSongNow(c.songId)
+          else if (c.type === 'move') queue.moveSong(c.songId, c.afterId ?? null)
+        }
+      }, [queue.setPaused, queue.skipIfCurrent, queue.playSongNow, queue.moveSong])
+      return { room: useRoomSync({ onCommands }), queue }
+    }
+    const stateWrapper = ({ children }) =>
+      React.createElement(QueueProvider, { initialStateOverride: initialState }, children)
+    const { result } = renderHook(useTV, { wrapper: stateWrapper })
+    await act(async () => { await result.current.room.createRoom() })
+    const poll = async () => { await act(async () => { vi.advanceTimersByTime(POLL_INTERVAL_MS) }) }
+    return { result, roomCommands, poll }
+  }
+
+  const ids = (list) => list.map((s) => s.id)
+
+  it('applies every command sent between polls, in order, once', async () => {
+    const { result, roomCommands, poll } = await setupTV({
+      current: song('a'), queue: [song('b'), song('c'), song('d')], history: [], paused: false,
+    })
+    roomCommands.push(
+      { type: 'move', songId: 'd', afterId: null },
+      { type: 'move', songId: 'b', afterId: 'c' },
+      { type: 'pause' },
+    )
+    await poll()
+    await poll()
+    expect(ids(result.current.queue.queue)).toEqual(['d', 'c', 'b'])
+    expect(result.current.queue.paused).toBe(true)
+  })
+
+  it('plays a queued song now by id', async () => {
+    const { result, roomCommands, poll } = await setupTV({
+      current: song('a'), queue: [song('b'), song('c')], history: [], paused: false,
+    })
+    roomCommands.push({ type: 'playNow', songId: 'c' })
+    await poll()
+    expect(result.current.queue.current.id).toBe('c')
+  })
+
+  it('ignores a "next" for a song that has already finished', async () => {
+    const { result, roomCommands, poll } = await setupTV({
+      current: song('b'), queue: [song('c')], history: [], paused: false,
+    })
+    // The phone pressed Next while "a" was playing, but "a" ended on its own first
+    roomCommands.push({ type: 'skip', currentId: 'a' })
+    await poll()
+    expect(result.current.queue.current.id).toBe('b')
+    roomCommands.push({ type: 'skip', currentId: 'b' })
+    await poll()
+    expect(result.current.queue.current.id).toBe('c')
+  })
+
+  it('leaves the order alone when a move refers to a song that already played', async () => {
+    const { result, roomCommands, poll } = await setupTV({
+      current: song('a'), queue: [song('b'), song('c')], history: [], paused: false,
+    })
+    roomCommands.push({ type: 'move', songId: 'c', afterId: 'gone' })
+    await poll()
+    expect(ids(result.current.queue.queue)).toEqual(['b', 'c'])
+  })
+})

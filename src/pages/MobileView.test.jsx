@@ -35,40 +35,128 @@ describe('MobileView', () => {
     expect(screen.getByTestId('search-btn')).toBeInTheDocument()
   })
 
-  it('shows nothing-playing when no current song', () => {
+  it('shows nothing-playing and disabled controls before joining a room', () => {
     renderMobile({ current: null, queue: [], history: [] })
-    expect(screen.getByTestId('nothing-playing')).toBeInTheDocument()
+    expect(screen.getByTestId('nothing-playing')).toHaveTextContent('Join a room')
+    expect(screen.getByTestId('mobile-play-pause-btn')).toBeDisabled()
+    expect(screen.getByTestId('mobile-skip-btn')).toBeDisabled()
   })
 
-  it('shows now-playing card when song is current', () => {
-    renderMobile({ current: song1, queue: [], history: [] })
-    expect(screen.getByTestId('now-playing')).toBeInTheDocument()
-    expect(screen.getByText('Bohemian Rhapsody')).toBeInTheDocument()
-  })
+  describe('remote for the TV', () => {
+    // A fake room server: get-room reports the TV's state; commands are recorded
+    let tv, commands, fetchSpy
+    beforeEach(() => {
+      tv = { current: null, tvQueue: [], tvPaused: false }
+      commands = []
+      fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, opts) => {
+        if (url === '/api/push-command') {
+          commands.push(JSON.parse(opts.body).command)
+          return { ok: true, json: async () => ({ ok: true }) }
+        }
+        return { ok: true, json: async () => ({ songs: [], commands: [], ...tv }) }
+      })
+      window.history.replaceState({}, '', '/?room=ROOM')
+    })
+    afterEach(() => {
+      fetchSpy.mockRestore()
+      window.history.replaceState({}, '', '/')
+    })
 
-  it('shows queue-empty message when queue is empty', () => {
-    renderMobile({ current: null, queue: [], history: [] })
-    expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
-  })
+    const req = (id, title, singerName) => ({ id, videoId: `v-${id}`, title, artist: 'Artist', singerName })
+    const openQueueTab = () => fireEvent.click(screen.getByRole('tab', { name: /Song Queue/ }))
 
-  it('renders queue list when songs are queued', () => {
-    renderMobile({ current: null, queue: [song1, song2], history: [] })
-    expect(screen.getByTestId('queue-list')).toBeInTheDocument()
-    expect(screen.getByText('Bohemian Rhapsody')).toBeInTheDocument()
-    expect(screen.getByText('Hotel California')).toBeInTheDocument()
-  })
+    it('sits between the app name and the input fields', async () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      const bar = screen.getByTestId('now-playing-bar')
+      const heading = screen.getByRole('heading', { level: 1 })
+      expect(heading.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(bar.compareDocumentPosition(screen.getByLabelText('Your Name')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
 
-  it('queue shows correct count', () => {
-    renderMobile({ current: null, queue: [song1, song2], history: [] })
-    expect(screen.getByText('Queue (2)')).toBeInTheDocument()
-  })
+    it("shows the TV's current song and singer", async () => {
+      tv.current = req('r1', 'Bohemian Rhapsody', 'Alex')
+      renderMobile({ current: null, queue: [], history: [] })
+      const card = await screen.findByTestId('now-playing')
+      expect(card).toHaveTextContent('Bohemian Rhapsody')
+      expect(card).toHaveTextContent('🎤 Alex')
+    })
 
-  it('remove button removes song from queue', () => {
-    renderMobile({ current: null, queue: [song1, song2], history: [] })
-    const removeBtn = screen.getByRole('button', { name: `Remove ${song1.title}` })
-    fireEvent.click(removeBtn)
-    expect(screen.queryByText('Bohemian Rhapsody')).not.toBeInTheDocument()
-    expect(screen.getByText('Hotel California')).toBeInTheDocument()
+    it('Next sends a skip for the song it saw playing', async () => {
+      tv.current = req('r1', 'Bohemian Rhapsody', 'Alex')
+      renderMobile({ current: null, queue: [], history: [] })
+      await screen.findByTestId('now-playing')
+      fireEvent.click(screen.getByRole('button', { name: 'Next Song' }))
+      await waitFor(() => expect(commands).toEqual([{ type: 'skip', currentId: 'r1' }]))
+    })
+
+    it('play/pause follows the TV and flips straight away when tapped', async () => {
+      tv.current = req('r1', 'Bohemian Rhapsody', 'Alex')
+      renderMobile({ current: null, queue: [], history: [] })
+      await screen.findByTestId('now-playing')
+      const button = screen.getByTestId('mobile-play-pause-btn')
+      expect(button).toHaveAccessibleName('Pause')
+      fireEvent.click(button)
+      expect(button).toHaveAccessibleName('Play')
+      await waitFor(() => expect(commands).toEqual([{ type: 'pause' }]))
+    })
+
+    it('shows Play when the TV is paused, and sends resume', async () => {
+      tv.current = req('r1', 'Bohemian Rhapsody', 'Alex')
+      tv.tvPaused = true
+      renderMobile({ current: null, queue: [], history: [] })
+      await waitFor(() => expect(screen.getByTestId('mobile-play-pause-btn')).toHaveAccessibleName('Play'))
+      fireEvent.click(screen.getByTestId('mobile-play-pause-btn'))
+      await waitFor(() => expect(commands).toEqual([{ type: 'resume' }]))
+    })
+
+    it('opens on Search Results, with the Song Queue tab next to it', () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs.map((t) => t.textContent)).toEqual([expect.stringMatching(/^Search Results/), expect.stringMatching(/^Song Queue/)])
+      expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByTestId('results-empty')).toBeInTheDocument()
+    })
+
+    it("Song Queue shows the TV's queue with singers and a count", async () => {
+      tv.tvQueue = [req('r1', 'Bohemian Rhapsody', 'Alex'), req('r2', 'Hotel California', 'Sam')]
+      renderMobile({ current: null, queue: [], history: [] })
+      await waitFor(() => expect(screen.getByRole('tab', { name: 'Song Queue (2)' })).toBeInTheDocument())
+      openQueueTab()
+      const list = screen.getByTestId('queue-list')
+      expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+        expect.stringContaining('Bohemian Rhapsody🎤 Alex'),
+        expect.stringContaining('Hotel California🎤 Sam'),
+      ])
+      expect(screen.getByRole('button', { name: 'Drag to reorder Hotel California' })).toBeInTheDocument()
+    })
+
+    it('Play on a queued song tells the TV to play it now', async () => {
+      tv.tvQueue = [req('r1', 'Bohemian Rhapsody', 'Alex'), req('r2', 'Hotel California', 'Sam')]
+      renderMobile({ current: null, queue: [], history: [] })
+      openQueueTab()
+      fireEvent.click(await screen.findByRole('button', { name: 'Play Hotel California now' }))
+      await waitFor(() => expect(commands).toEqual([{ type: 'playNow', songId: 'r2' }]))
+      expect(await screen.findByTestId('toast')).toHaveTextContent('Playing now: Hotel California')
+    })
+
+    it('says when the queue is empty', async () => {
+      renderMobile({ current: null, queue: [], history: [] })
+      openQueueTab()
+      expect(await screen.findByTestId('queue-empty')).toHaveTextContent('No songs queued yet')
+    })
+
+    it('reports when a command could not reach the TV', async () => {
+      tv.current = req('r1', 'Bohemian Rhapsody', 'Alex')
+      fetchSpy.mockImplementation(async (url) => url === '/api/push-command'
+        ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, json: async () => ({ songs: [], commands: [], ...tv }) })
+      renderMobile({ current: null, queue: [], history: [] })
+      await screen.findByTestId('now-playing')
+      fireEvent.click(screen.getByTestId('mobile-play-pause-btn'))
+      expect(await screen.findByTestId('toast')).toHaveTextContent("Couldn't reach the TV")
+      // The optimistic flip is undone
+      await waitFor(() => expect(screen.getByTestId('mobile-play-pause-btn')).toHaveAccessibleName('Pause'))
+    })
   })
 
   describe('clear search button', () => {
@@ -95,11 +183,6 @@ describe('MobileView', () => {
     })
   })
 
-  it('has no Next Song control (TV only)', () => {
-    renderMobile({ current: song1, queue: [song2], history: [] })
-    expect(screen.queryByTestId('mobile-skip-btn')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /next song/i })).not.toBeInTheDocument()
-  })
 
   it('shows the app name and sets the page title', () => {
     renderMobile({ current: null, queue: [], history: [] })
@@ -114,16 +197,7 @@ describe('MobileView', () => {
     expect(input.value).toBe('Queen')
   })
 
-  it('has no play/pause control (TV only)', () => {
-    renderMobile({ current: song1, queue: [], history: [] })
-    expect(screen.queryByTestId('mobile-play-pause-btn')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^(play|pause)$/i })).not.toBeInTheDocument()
-  })
 
-  it('shows the singer on the Now Playing card', () => {
-    renderMobile({ current: { ...song1, singerName: 'Alex' }, queue: [], history: [] })
-    expect(screen.getByTestId('now-playing')).toHaveTextContent('🎤 Alex')
-  })
 
   describe('top fields', () => {
     it('labels each field on the left with helper text inside', () => {
@@ -236,7 +310,6 @@ describe('MobileView', () => {
       expect(screen.getByLabelText('Your Name')).toHaveAttribute('aria-invalid', 'true')
       expect(screen.getByLabelText('Room')).toHaveAttribute('aria-invalid', 'true')
       expect(screen.getByLabelText('Your Name')).toHaveFocus()
-      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
       expect(pushSongCalls()).toHaveLength(0)
     })
 
@@ -248,7 +321,7 @@ describe('MobileView', () => {
         'Enter the Room code from the TV before adding a song'
       )
       expect(screen.getByLabelText('Room')).toHaveFocus()
-      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
+      expect(pushSongCalls()).toHaveLength(0)
     })
 
     it('blocks when only the singer name is missing', () => {
@@ -258,7 +331,7 @@ describe('MobileView', () => {
       expect(screen.getByTestId('toast')).toHaveTextContent(
         'Enter your name before adding a song'
       )
-      expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
+      expect(pushSongCalls()).toHaveLength(0)
     })
 
     it('treats a whitespace-only name as missing', () => {
@@ -319,6 +392,7 @@ describe('MobileView', () => {
       typeName('Alex')
       typeRoom('ABCD')
       addToQueue()
+      fireEvent.click(screen.getByRole('tab', { name: /Song Queue/ }))
       expect(await screen.findByTestId('queue-list')).toHaveTextContent('🎤 Alex')
     })
 

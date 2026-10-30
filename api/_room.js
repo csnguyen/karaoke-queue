@@ -8,7 +8,7 @@ export const CODE_CHARS = 'ACDEFHJKMNPQRTUVWXY3479'
 // A room lives this long after its last activity (TV keep-alive, song request or TV update)
 export const ROOM_TTL = 28800 // 8 hours
 
-const ROOM_KEYS = ['meta', 'songs', 'current', 'queue', 'command']
+const ROOM_KEYS = ['meta', 'songs', 'current', 'queue', 'paused', 'commands']
 
 export const roomKey = (code, part) => `room:${code}:${part}`
 
