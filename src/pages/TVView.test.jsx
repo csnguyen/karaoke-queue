@@ -153,6 +153,39 @@ describe('TVView', () => {
       expect(screen.queryByTestId('player-empty')).not.toBeInTheDocument()
     })
 
+    it('always encodes the room code the TV is showing', async () => {
+      renderTV({ current: song1, queue: [], history: [] })
+      const qr = await screen.findByTestId('join-qr')
+      const shownCode = screen.getByTestId('room-code').textContent
+      expect(new URL(qr.dataset.joinUrl).searchParams.get('room')).toBe(shownCode)
+    })
+
+    it('keeps pointing at a working room with the same code if the room expires', async () => {
+      // The room exists, then disappears on the server (e.g. hours with no songs).
+      let roomAlive = true
+      const createBodies = []
+      globalThis.fetch.mockImplementation(async (url, opts) => {
+        if (url === '/api/create-room') {
+          const body = JSON.parse(opts?.body ?? '{}')
+          createBodies.push(body)
+          roomAlive = true
+          return { ok: true, status: 200, json: async () => ({ code: body.code ?? '19S3' }) }
+        }
+        if (String(url).startsWith('/api/get-room') && !roomAlive) {
+          return { ok: false, status: 404, json: async () => ({ error: 'Room not found or expired' }) }
+        }
+        return { ok: true, status: 200, json: async () => ({ songs: [] }) }
+      })
+      renderTV({ current: song1, queue: [], history: [] })
+      const qr = await screen.findByTestId('join-qr')
+      expect(qr.dataset.joinUrl).toMatch(/\?room=19S3$/)
+
+      roomAlive = false
+      await vi.waitFor(() => expect(createBodies).toContainEqual({ code: '19S3' }), { timeout: 4000 })
+      expect(screen.getByTestId('join-qr').dataset.joinUrl).toMatch(/\?room=19S3$/)
+      expect(screen.getByTestId('room-code')).toHaveTextContent('19S3')
+    })
+
     it('shows a placeholder until the room exists', () => {
       renderTV({ current: null, queue: [], history: [] })
       expect(screen.getByTestId('join-qr-pending')).toHaveTextContent('Creating room')

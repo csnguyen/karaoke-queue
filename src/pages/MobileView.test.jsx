@@ -128,14 +128,14 @@ describe('MobileView', () => {
   describe('top fields', () => {
     it('labels each field on the left with helper text inside', () => {
       renderMobile({ current: null, queue: [], history: [] })
-      expect(screen.getByLabelText('Singer')).toHaveAttribute('placeholder', 'Your Name')
+      expect(screen.getByLabelText('Your Name')).toHaveAttribute('placeholder', 'Your Name')
       expect(screen.getByLabelText('Room')).toHaveAttribute('placeholder', 'Room Code (4 letter code on TV)')
       expect(screen.getByLabelText('Song')).toHaveAttribute('placeholder', 'Search song or artist name')
     })
 
     it('marks Singer and Room as required', () => {
       renderMobile({ current: null, queue: [], history: [] })
-      expect(screen.getByLabelText('Singer')).toBeRequired()
+      expect(screen.getByLabelText('Your Name')).toBeRequired()
       expect(screen.getByLabelText('Room')).toBeRequired()
     })
 
@@ -176,14 +176,14 @@ describe('MobileView', () => {
     it('puts the cursor in the Singer field when no name is saved', () => {
       window.history.replaceState({}, '', '/?room=AB12')
       renderMobile({ current: null, queue: [], history: [] })
-      expect(screen.getByLabelText('Singer')).toHaveFocus()
+      expect(screen.getByLabelText('Your Name')).toHaveFocus()
     })
 
     it('leaves focus alone when the name is already remembered', () => {
       localStorage.setItem('karaoke-singer-name', 'Alex')
       window.history.replaceState({}, '', '/?room=AB12')
       renderMobile({ current: null, queue: [], history: [] })
-      expect(screen.getByLabelText('Singer')).not.toHaveFocus()
+      expect(screen.getByLabelText('Your Name')).not.toHaveFocus()
     })
 
     it('starts polling the linked room', async () => {
@@ -216,7 +216,7 @@ describe('MobileView', () => {
       fetchSpy.mockRestore()
     })
 
-    const typeName = (name) => fireEvent.change(screen.getByLabelText('Singer'), { target: { value: name } })
+    const typeName = (name) => fireEvent.change(screen.getByLabelText('Your Name'), { target: { value: name } })
     const typeRoom = (code) => fireEvent.change(screen.getByLabelText('Room'), { target: { value: code } })
     const addToQueue = () => fireEvent.click(screen.getByRole('button', { name: `Add ${song1.title} to queue` }))
     const playNext = () => fireEvent.click(screen.getByRole('button', { name: `Play ${song1.title} next` }))
@@ -231,11 +231,11 @@ describe('MobileView', () => {
       setup()
       addToQueue()
       expect(screen.getByTestId('toast')).toHaveTextContent(
-        'Enter your Singer name and the Room code from the TV before adding a song'
+        'Enter your name and the Room code from the TV before adding a song'
       )
-      expect(screen.getByLabelText('Singer')).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByLabelText('Your Name')).toHaveAttribute('aria-invalid', 'true')
       expect(screen.getByLabelText('Room')).toHaveAttribute('aria-invalid', 'true')
-      expect(screen.getByLabelText('Singer')).toHaveFocus()
+      expect(screen.getByLabelText('Your Name')).toHaveFocus()
       expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
       expect(pushSongCalls()).toHaveLength(0)
     })
@@ -256,7 +256,7 @@ describe('MobileView', () => {
       typeRoom('ABCD')
       addToQueue()
       expect(screen.getByTestId('toast')).toHaveTextContent(
-        'Enter your Singer name before adding a song'
+        'Enter your name before adding a song'
       )
       expect(screen.getByTestId('queue-empty')).toBeInTheDocument()
     })
@@ -266,7 +266,7 @@ describe('MobileView', () => {
       typeName('   ')
       typeRoom('ABCD')
       addToQueue()
-      expect(screen.getByTestId('toast')).toHaveTextContent('Enter your Singer name')
+      expect(screen.getByTestId('toast')).toHaveTextContent('Enter your name')
     })
 
     it('treats an incomplete room code as missing', () => {

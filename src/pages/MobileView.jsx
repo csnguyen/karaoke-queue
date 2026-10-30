@@ -192,7 +192,7 @@ export default function MobileView() {
         const firstMissing = !name ? singerInputRef.current : roomInputRef.current
         firstMissing?.focus()
         firstMissing?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-        const missing = [!name && 'your Singer name', !room && 'the Room code from the TV'].filter(Boolean)
+        const missing = [!name && 'your name', !room && 'the Room code from the TV'].filter(Boolean)
         showToast(`Enter ${missing.join(' and ')} before adding a song`)
         return
       }
@@ -232,7 +232,7 @@ export default function MobileView() {
         <h1 className="text-xl font-bold text-purple-400 mb-3">{APP_NAME}</h1>
 
         <div className="flex items-center gap-2 mb-1">
-          <label htmlFor="singer-name" className={FIELD_LABEL_CLASS}>Singer</label>
+          <label htmlFor="singer-name" className={FIELD_LABEL_CLASS}>Your Name</label>
           <input
             id="singer-name"
             ref={singerInputRef}
