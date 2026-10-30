@@ -317,20 +317,22 @@ export default function TVView() {
             <button
               onClick={togglePlayback}
               disabled={!current}
-              className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-full font-medium transition-colors whitespace-nowrap"
+              className="w-14 h-14 flex items-center justify-center bg-purple-600 hover:bg-purple-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-full text-2xl transition-colors"
               aria-label={paused ? 'Play' : 'Pause'}
+              title={paused ? 'Play' : 'Pause'}
               data-testid="tv-play-pause-btn"
             >
-              {paused ? '▶ Play' : '⏸ Pause'}
+              {paused ? '▶' : '⏸'}
             </button>
             <button
               onClick={nextSong}
               disabled={!current && queue.length === 0}
-              className="px-5 py-2.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed rounded-full font-medium transition-colors whitespace-nowrap"
+              className="w-14 h-14 flex items-center justify-center bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed rounded-full text-2xl transition-colors"
               aria-label="Next Song"
+              title="Next Song"
               data-testid="tv-next-btn"
             >
-              Next Song ⏭
+              ⏭
             </button>
           </div>
         </section>

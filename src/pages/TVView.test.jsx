@@ -179,13 +179,15 @@ describe('TVView', () => {
       expect(toastTexts()).toEqual([])
     })
 
-    it('fades each notice after a few seconds', () => {
+    it('keeps each notice on screen for 7 seconds', () => {
       vi.useFakeTimers()
       try {
         renderTV({ current: song1, queue: [song2], history: [] })
         fireEvent.click(screen.getByTestId('tv-play-pause-btn'))
+        expect(ACTIVITY_TOAST_MS).toBe(7000)
+        act(() => { vi.advanceTimersByTime(6999) })
         expect(toastTexts()).toHaveLength(1)
-        act(() => { vi.advanceTimersByTime(ACTIVITY_TOAST_MS) })
+        act(() => { vi.advanceTimersByTime(1) })
         expect(toastTexts()).toEqual([])
       } finally {
         vi.useRealTimers()
@@ -354,6 +356,17 @@ describe('TVView', () => {
     expect(btn).toHaveAccessibleName('Pause')
     fireEvent.click(btn)
     expect(btn).toHaveAccessibleName('Play')
+  })
+
+  it('play/pause and next show only icons, like the phone', () => {
+    renderTV({ current: song1, queue: [song2], history: [], paused: false })
+    expect(screen.getByTestId('tv-play-pause-btn').textContent).toBe('⏸')
+    expect(screen.getByTestId('tv-next-btn').textContent).toBe('⏭')
+    fireEvent.click(screen.getByTestId('tv-play-pause-btn'))
+    expect(screen.getByTestId('tv-play-pause-btn').textContent).toBe('▶')
+    // Still named for screen readers and hover tooltips
+    expect(screen.getByTestId('tv-play-pause-btn')).toHaveAttribute('title', 'Play')
+    expect(screen.getByTestId('tv-next-btn')).toHaveAccessibleName('Next Song')
   })
 
   it('Next Song button advances to the next queued song', () => {

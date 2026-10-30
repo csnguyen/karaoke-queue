@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 
-export const ACTIVITY_TOAST_MS = 6000
+export const ACTIVITY_TOAST_MS = 7000
 const MAX_VISIBLE = 3
 
 // Short-lived "who did what" notices; newest at the bottom
